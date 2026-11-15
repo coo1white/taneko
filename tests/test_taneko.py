@@ -270,5 +270,16 @@ class Layers(unittest.TestCase):
                             self.assertIn(t, self.ALLOWED[layer], "%s 不能引用 %s" % (where, t))
 
 
+
+class OneAgentsFile(unittest.TestCase):
+    """规则只有一份 AGENTS.md。有 CLAUDE.md 时 Claude Code 只读它、不读 AGENTS.md，规则就分叉了。"""
+
+    def test_no_claude_md_anywhere(self):
+        repo = Path(__file__).resolve().parent.parent
+        self.assertTrue((repo / "AGENTS.md").is_file())
+        found = [str(p.relative_to(repo)) for name in ("CLAUDE.md", "CLAUDE.local.md") for p in repo.rglob(name)
+                 if ".git" not in p.relative_to(repo).parts]
+        self.assertEqual(found, [], "删掉这些文件，规则写进 AGENTS.md：%s" % found)
+
 if __name__ == "__main__":
     unittest.main()

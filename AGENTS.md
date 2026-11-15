@@ -1,5 +1,7 @@
 # Notes for agents (and people)
 
+This is the one rules file for every agent, Claude Code included. Do not add a `CLAUDE.md` or `CLAUDE.local.md`: Claude Code would read only that file and skip this one, so a test fails if either exists.
+
 Read first:
 
 - [README.md](README.md): what taneko does and how to use it.
