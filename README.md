@@ -48,7 +48,7 @@ Taneko 是这个工坊里一位昭和复古风的“种子娘”：网断了，�
 | 下载 | [yt-dlp](https://github.com/yt-dlp/yt-dlp)（Unlicense）+ deno（JS 运行时）+ 浏览器 cookies | 取得视频流；以子进程调用 |
 | 媒体处理 | [FFmpeg](https://ffmpeg.org/) / ffprobe（LGPL 2.1+，视构建方式可能为 GPL）：`-copyts`、stream copy、concat demuxer、缩略图比对 | 分片保留绝对时间戳、无损截取与拼接、读取包时间戳；以子进程调用 |
 | 语音识别 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) + CTranslate2，模型 large-v3，CUDA GPU（float16） | 本地转写，不上传视频 |
-| 翻译 | [llm-subtrans](https://github.com/machinewrapped/llm-subtrans) + OpenAI 兼容接口（当前 OpenCode） | 按术语表和领域说明翻译字幕，可随时中断续译 |
+| 翻译 | [llm-subtrans](https://github.com/machinewrapped/llm-subtrans) + OpenAI 兼容接口（当前 OpenCode） | 按术语表和领域说明翻译字幕；分段翻译，译完一段存一段，中断后重跑只补没译完的段 |
 | 状态与配置 | 每个项目一个 `meta.json`；`config/*.json` | 项目配置、术语表、检查点放行记录 |
 | 质量 | `unittest`、Mermaid（架构图）、Git | 测试、文档、版本管理 |
 

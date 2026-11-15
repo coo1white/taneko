@@ -15,5 +15,8 @@
   ],
   "names": [],
   "terminology": [],
-  "chapter_numbering": "chapter"
+  "chapter_numbering": "chapter",
+  "segment_lines": 200,
+  "segment_timeout": 1800,
+  "segment_tries": 2
 }

@@ -54,6 +54,46 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual(cm.exception.code, core.EXIT_FAIL)
 
 
+class Segments(unittest.TestCase):
+    def cues(self, n):
+        return [{"start": float(i), "end": i + 0.5, "text": "en%d" % i} for i in range(n)]
+
+    def test_resume_skips_finished_segments(self):
+        en, seg = self.cues(10), TMP / "seg1"
+        calls = []
+
+        def make(fail_on):
+            def run_one(src, out):
+                calls.append(src.name)
+                if src.name == fail_on:
+                    return False  # 模拟这一段卡住/失败
+                core.write_srt([dict(c, text="zh" + c["text"][2:]) for c in core.parse_srt(src.read_text("utf-8"))], out)
+                return True
+            return run_one
+
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            subtitle.translate_segments(en, seg, make("en_02.srt"), size=4)
+        self.assertEqual(calls, ["en_01.srt", "en_02.srt"])      # 第 2 段失败，停下
+        self.assertTrue((seg / "zh_01.srt").exists())             # 第 1 段已存盘
+        calls.clear()
+        with redirect_stdout(io.StringIO()):
+            zh = subtitle.translate_segments(en, seg, make(None), size=4)
+        self.assertEqual(calls, ["en_02.srt", "en_03.srt"])      # 重跑：跳过第 1 段
+        self.assertEqual([z["text"] for z in zh], ["zh%d" % i for i in range(10)])  # 顺序、条数完整
+
+    def test_tiny_last_segment_is_merged(self):
+        seen = []
+
+        def run_one(src, out):
+            seen.append(len(core.parse_srt(src.read_text("utf-8"))))
+            core.write_srt(core.parse_srt(src.read_text("utf-8")), out)
+            return True
+
+        with redirect_stdout(io.StringIO()):
+            subtitle.translate_segments(self.cues(17), TMP / "seg2", run_one, size=8)
+        self.assertEqual(seen, [8, 9])  # 末段只有 1 条（不足四分之一段），并入前一段
+
+
 class Flow(unittest.TestCase):
     def meta(self, **kw):
         m = {"source_url": "u", "video_glob": "*.mkv", "section": {"download": "0:00:00-0:00:10", "name": "g"},

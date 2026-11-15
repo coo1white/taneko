@@ -108,6 +108,33 @@ def ensure_header_patch(tool: Path) -> None:
 
 
 
+def translate_segments(en, segdir, run_one, size=200):
+    """分段翻译：每段单独跑一次 llm-subtrans，译完立刻存成独立文件；重跑时跳过已译完的段。
+    （llm-subtrans 要等整次运行结束才写进度，一次译完整部会在中断时全丢，所以这里自己分段存盘。）
+    run_one(src, out) -> bool 负责真正翻译一段；返回合并后的译文条目。"""
+    segdir.mkdir(exist_ok=True)
+    parts = [en[i:i + size] for i in range(0, len(en), size)]
+    if len(parts) > 1 and len(parts[-1]) < max(1, size // 4):  # 最后一段太短就并入前一段
+        tail = parts.pop()
+        parts[-1] = parts[-1] + tail
+    merged = []
+    for i, part in enumerate(parts, 1):
+        src, out = segdir / ("en_%02d.srt" % i), segdir / ("zh_%02d.srt" % i)
+        if out.exists() and len(read_cues(out)) == len(part):
+            print("✓ 第 %d/%d 段已译完，跳过" % (i, len(parts)))
+            merged += read_cues(out)
+            continue
+        write_srt(part, src)
+        print("\n== 翻译第 %d/%d 段（%d 条）==" % (i, len(parts), len(part)))
+        ok = run_one(src, out)
+        z = read_cues(out) if ok and out.exists() else []
+        if len(z) != len(part):
+            die("第 %d/%d 段没有译完（译文 %d 条 / 原文 %d 条）。前面已译完的段保存在 %s，"
+                "重跑同一条命令会从这一段继续" % (i, len(parts), len(z), len(part), segdir))
+        merged += z
+    return merged
+
+
 def cmd_translate(a) -> None:
     """用 llm-subtrans + 你自己的 API（OpenCode）把 en.srt 译成 zh.srt。密钥只放内存，不写文件。"""
     import getpass
@@ -155,8 +182,6 @@ def cmd_translate(a) -> None:
     instr += list(pt.get("instructions", []))
     for t_ in instr:
         cmd += ["--instruction", t_]
-    if not a.test:
-        cmd += ["--project"]
     import uuid
     env = dict(os.environ, CUSTOM_API_KEY=key, PYTHONUTF8="1",
                CUSTOM_EXTRA_HEADERS=json.dumps({"x-opencode-session": "taneko-" + uuid.uuid4().hex}))
@@ -164,18 +189,34 @@ def cmd_translate(a) -> None:
     if effort and effort != "default":
         env["CUSTOM_EXTRA_BODY"] = json.dumps({"reasoning_effort": effort})
     print("推理强度 reasoning_effort：%s" % (effort or "未设置（服务端默认）"))
-    print("开始翻译 %d 条（%s）…" % (a.test or len(en), "测试" if a.test else "完整，可随时中断后重跑续译"))
-    rc = subprocess.call(cmd, cwd=str(tool), env=env)
-    if rc != 0 or not out.exists():
-        die("翻译没有成功（退出码 %s）。把上面最后几行报错发给我，不要发密钥。" % rc)
-    zh = read_cues(out)
+    timeout, tries = cfg.get("segment_timeout", 1800), cfg.get("segment_tries", 2)
+
+    def run_one(s, o):
+        c = list(cmd)
+        c[2], c[4] = str(s), str(o)  # cmd = [python, script, 源文件, "-o", 输出文件, ...]
+        for n in range(1, tries + 1):
+            try:
+                if subprocess.run(c, cwd=str(tool), env=env, timeout=timeout).returncode == 0:
+                    return True
+            except subprocess.TimeoutExpired:
+                print("⚠ 这一段超过 %d 秒没有结束（可能服务端卡住），已终止，第 %d/%d 次尝试" % (timeout, n, tries))
+        return False
+
     if a.test:
+        print("开始翻译 %d 条（测试）…" % a.test)
+        if not run_one(src, out):
+            die("翻译没有成功。把上面最后几行报错发给我，不要发密钥。")
+        zh = read_cues(out)
         print("\n测试结果（前 %d 条）：" % min(8, len(zh)))
         for e, z in list(zip(en, zh))[:8]:
             print("  EN:", e["text"].replace("\n", " "))
             print("  ZH:", z["text"].replace("\n", " "))
         print("条数：原文 %d / 译文 %d。看着满意就再运行 translate（不带 --test）。" % (min(a.test, len(en)), len(zh)))
         return
+    size = cfg.get("segment_lines", 200)
+    print("开始翻译 %d 条：每 %d 条一段，译完一段存一段，中断后重跑会跳过已完成的段…" % (len(en), size))
+    zh = translate_segments(en, d / "_translate", run_one, size)
+    write_srt(zh, out)
     if len(zh) != len(en):
         die("译文条数 %d 与原文 %d 不一致，已保留 %s，需要人工处理或重跑" % (len(zh), len(en), out))
     write_srt([{"start": e["start"], "end": e["end"], "text": z["text"]} for e, z in zip(en, zh)], d / "zh.srt")
