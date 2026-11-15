@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from argparse import Namespace
 
@@ -79,6 +80,40 @@ def cmd_approve(a) -> None:
     print("已记录：%s 的“%s”检查点通过。" % (a.project, a.what))
 
 
+def cmd_key(a) -> int:
+    """管理翻译用的 API 密钥：set 保存（输入时不显示）、status 只看有没有和长度、clear 删除。"""
+    name = core.load_config("translate")["key_env"]
+    if a.action == "set":
+        if not sys.stdin.isatty():
+            core.die("需要在交互终端里运行（输入时不显示）")
+        import getpass
+        v = getpass.getpass("粘贴 %s（输入时不显示，粘贴后直接回车）：" % name).strip()
+        if not v:
+            core.die("没有输入内容，没有保存")
+        if sys.platform != "win32":
+            print("非 Windows 系统：请自己把它写进 shell 配置，例如 export %s=...（不要提交到 git）" % name)
+            return core.EXIT_OK
+        core._win_env_set(name, v)
+        print("已保存 %s（%d 个字符）。新开的窗口自动可用；它以明文存在你的 Windows 账户环境变量里，不在项目和仓库里。" % (name, len(v)))
+        print("删除：taneko key clear")
+    elif a.action == "clear":
+        if sys.platform == "win32":
+            core._win_env_set(name, None)
+        print("已删除保存的 %s（当前窗口里已有的变量要关闭窗口才会消失）。" % name)
+    else:  # status：只报告有没有、多长、从哪来，绝不显示内容
+        if os.environ.get(name):
+            src, k = "当前窗口的环境变量", os.environ[name]
+        elif os.environ.get("CUSTOM_API_KEY"):
+            src, k = "CUSTOM_API_KEY 环境变量", os.environ["CUSTOM_API_KEY"]
+        elif core._win_env_get(name):
+            src, k = "Windows 用户环境变量", core._win_env_get(name)
+        else:
+            print("没有找到 %s。运行 taneko key set 保存一次。" % name)
+            return core.EXIT_FAIL
+        print("已设置（来源：%s，%d 个字符）" % (src, len(k)))
+    return core.EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="taneko", description="下载 + 字幕：可续传、可恢复、带人工检查点")
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -89,6 +124,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("project", nargs="?"); p.set_defaults(fn=cmd_status)
     p = sp.add_parser("approve", help="通过人工检查点")
     p.add_argument("project"); p.add_argument("what", choices=["terms", "spot"]); p.set_defaults(fn=cmd_approve)
+
+    p = sp.add_parser("key", help="管理翻译用的 API 密钥（输入时不显示）")
+    p.add_argument("action", choices=["set", "status", "clear"]); p.set_defaults(fn=cmd_key)
 
     p = sp.add_parser("fetch", help="可续传分片下载")
     p.add_argument("project"); p.add_argument("--format", default=None); p.add_argument("--browser", default=None)

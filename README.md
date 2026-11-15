@@ -89,7 +89,15 @@ python taneko.py approve lol-worlds-2026-g1 spot    # 抽查完，放行
 
 路径默认：项目根 = framework 的上一级，项目在 `<根>\projects`，翻译工具在 `<根>\workflow\vendor`。
 可用环境变量覆盖：`TANEKO_ROOT`、`TANEKO_PROJECTS`、`TANEKO_CONFIG`、`TANEKO_VENDOR`。
-API 密钥只走环境变量 `OPENCODE_API_KEY`（或运行时输入）。
+API 密钥只走环境变量 `OPENCODE_API_KEY`，从不写进项目文件或仓库。第一次运行 `python taneko.py key set`：输入时屏幕不显示，保存到你的 Windows 用户环境变量，之后所有新窗口自动可用。
+
+```powershell
+python taneko.py key set      # 保存（输入时不显示）
+python taneko.py key status   # 只显示有没有、多长、从哪来，不显示内容
+python taneko.py key clear    # 删除
+```
+
+注意：它以明文存在你的 Windows 账户环境变量里，任何以你的账户运行的程序都读得到；不想保存就不运行 `key set`，翻译时会临时询问一次。
 
 ## 使用提醒
 

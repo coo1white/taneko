@@ -36,6 +36,42 @@ def die(msg: str) -> None:
     sys.exit(EXIT_FAIL)
 
 
+# ---------------------------------------------------------------- API 密钥
+# 密钥只来自环境变量；Windows 上也读“用户环境变量”（taneko key set 存的），
+# 这样已经打开的窗口不用重开就能用。密钥从不写进项目文件或仓库。
+def _win_env_get(name: str):
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            return winreg.QueryValueEx(k, name)[0] or None
+    except OSError:
+        return None
+
+
+def _win_env_set(name: str, value) -> None:
+    """写入（value=None 则删除）Windows 用户环境变量，并通知系统，新开的窗口立刻可用。"""
+    import ctypes
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as k:
+        if value is None:
+            try:
+                winreg.DeleteValue(k, name)
+            except FileNotFoundError:
+                pass
+        else:
+            winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)
+    try:
+        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 2, 5000, None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def get_api_key(name: str):
+    return os.environ.get(name) or os.environ.get("CUSTOM_API_KEY") or _win_env_get(name)
+
+
 # ---------------------------------------------------------------- 项目与 meta
 def project_dir(name: str) -> Path:
     d = PROJECTS / name

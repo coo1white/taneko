@@ -54,6 +54,37 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual(cm.exception.code, core.EXIT_FAIL)
 
 
+class ApiKey(unittest.TestCase):
+    def test_env_wins_and_status_never_prints_the_key(self):
+        name = core.load_config("translate")["key_env"]
+        old = os.environ.get(name)
+        os.environ[name] = "sk-test-SECRET-123456"
+        try:
+            self.assertEqual(core.get_api_key(name), "sk-test-SECRET-123456")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["key", "status"])
+            self.assertEqual(rc, core.EXIT_OK)
+            self.assertNotIn("SECRET", buf.getvalue())      # 不显示内容
+            self.assertIn("21 个字符", buf.getvalue())       # 只显示长度
+        finally:
+            if old is None:
+                del os.environ[name]
+            else:
+                os.environ[name] = old
+
+    def test_status_without_key_returns_fail(self):
+        name = core.load_config("translate")["key_env"]
+        old = {k: os.environ.pop(k) for k in (name, "CUSTOM_API_KEY") if k in os.environ}
+        try:
+            if core._win_env_get(name):
+                self.skipTest("这台机器的用户环境变量里已有密钥")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["key", "status"]), core.EXIT_FAIL)
+        finally:
+            os.environ.update(old)
+
+
 class Segments(unittest.TestCase):
     def cues(self, n):
         return [{"start": float(i), "end": i + 0.5, "text": "en%d" % i} for i in range(n)]

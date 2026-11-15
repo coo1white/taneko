@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import (CONFIG, VENDOR, FRAMEWORK_DIR, clean_auto, die, find_video, fmt_ts, load_config, load_meta,
+from .core import (CONFIG, get_api_key, VENDOR, FRAMEWORK_DIR, clean_auto, die, find_video, fmt_ts, load_config, load_meta,
                    parse_srt, project_dir, read_cues, run, tool_cmd, write_srt)
 
 
@@ -150,9 +150,11 @@ def cmd_translate(a) -> None:
         die("还没安装翻译工具，请先运行旧工作流里的 workflow\\setup_translate.bat")
     ensure_header_patch(tool)
     en = read_cues(d / "en.srt")
-    key = os.environ.get(cfg["key_env"]) or os.environ.get("CUSTOM_API_KEY")
+    key = get_api_key(cfg["key_env"])
     if not key:
-        key = getpass.getpass("请输入 API 密钥（输入时不显示，也不会保存）：").strip()
+        if not sys.stdin.isatty():
+            die("没有 API 密钥，而且当前不是交互终端，无法询问。请先在交互终端运行：taneko key set")
+        key = getpass.getpass("请输入 API 密钥（输入时不显示，只用于这一次；想保存请用 taneko key set）：").strip()
     if not key:
         die("没有密钥")
     if a.test:
