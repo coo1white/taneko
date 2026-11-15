@@ -1,11 +1,12 @@
-import io, json, os, shutil, subprocess, sys, tempfile, unittest
+import dataclasses, io, json, os, shutil, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
-from taneko import cli, core, state, subtitle  # noqa: E402
+from taneko import cli, core, flow, keys, project, srt  # noqa: E402
+from taneko.stages import translate  # noqa: E402
 
 SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:00:06,500\nBaron down\n"
 
@@ -13,7 +14,7 @@ SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:0
 def make_project(name, meta):
     d = core.PROJECTS / name
     d.mkdir(parents=True)
-    core.save_meta(d, meta)
+    project.save_meta(d, meta)
     return d
 
 
@@ -24,12 +25,12 @@ def make_video(path, secs):
 
 class Srt(unittest.TestCase):
     def test_roundtrip(self):
-        cues = core.parse_srt(SRT)
+        cues = srt.parse_srt(SRT)
         self.assertEqual(len(cues), 2)
         self.assertAlmostEqual(cues[1]["end"], 6.5)
         p = TMP / "x.srt"
-        core.write_srt(cues, p)
-        self.assertEqual(core.parse_srt(p.read_text("utf-8")), cues)
+        srt.write_srt(cues, p)
+        self.assertEqual(srt.parse_srt(p.read_text("utf-8")), cues)
 
 
 class ExitCodes(unittest.TestCase):
@@ -37,9 +38,10 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE, core.EXIT_NEEDS_HUMAN), (0, 1, 2, 10))
 
     def test_die_exits_with_fail(self):
-        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(core.Fail):
             core.die("x")
-        self.assertEqual(cm.exception.code, core.EXIT_FAIL)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["status", "no-such-project"]), core.EXIT_FAIL)
 
     def test_bad_args_exit_2(self):
         with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
@@ -49,9 +51,8 @@ class ExitCodes(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
     def test_unknown_project_exits_fail(self):
-        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
-            cli.main(["run", "no-such-project"])
-        self.assertEqual(cm.exception.code, core.EXIT_FAIL)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["run", "no-such-project"]), core.EXIT_FAIL)
 
 
 class ApiKey(unittest.TestCase):
@@ -60,7 +61,7 @@ class ApiKey(unittest.TestCase):
         old = os.environ.get(name)
         os.environ[name] = "sk-test-SECRET-123456"
         try:
-            self.assertEqual(core.get_api_key(name), "sk-test-SECRET-123456")
+            self.assertEqual(keys.get_api_key(name), "sk-test-SECRET-123456")
             buf = io.StringIO()
             with redirect_stdout(buf):
                 rc = cli.main(["key", "status"])
@@ -77,7 +78,7 @@ class ApiKey(unittest.TestCase):
         name = core.load_config("translate")["key_env"]
         old = {k: os.environ.pop(k) for k in (name, "CUSTOM_API_KEY") if k in os.environ}
         try:
-            if core._win_env_get(name):
+            if keys._win_env_get(name):
                 self.skipTest("这台机器的用户环境变量里已有密钥")
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["key", "status"]), core.EXIT_FAIL)
@@ -98,17 +99,17 @@ class Segments(unittest.TestCase):
                 calls.append(src.name)
                 if src.name == fail_on:
                     return False  # 模拟这一段卡住/失败
-                core.write_srt([dict(c, text="zh" + c["text"][2:]) for c in core.parse_srt(src.read_text("utf-8"))], out)
+                srt.write_srt([dict(c, text="zh" + c["text"][2:]) for c in srt.parse_srt(src.read_text("utf-8"))], out)
                 return True
             return run_one
 
-        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
-            subtitle.translate_segments(en, seg, make("en_02.srt"), size=4)
+        with redirect_stdout(io.StringIO()), self.assertRaises(core.Fail):
+            translate.translate_segments(en, seg, make("en_02.srt"), size=4)
         self.assertEqual(calls, ["en_01.srt", "en_02.srt"])      # 第 2 段失败，停下
         self.assertTrue((seg / "zh_01.srt").exists())             # 第 1 段已存盘
         calls.clear()
         with redirect_stdout(io.StringIO()):
-            zh = subtitle.translate_segments(en, seg, make(None), size=4)
+            zh = translate.translate_segments(en, seg, make(None), size=4)
         self.assertEqual(calls, ["en_02.srt", "en_03.srt"])      # 重跑：跳过第 1 段
         self.assertEqual([z["text"] for z in zh], ["zh%d" % i for i in range(10)])  # 顺序、条数完整
 
@@ -116,12 +117,12 @@ class Segments(unittest.TestCase):
         seen = []
 
         def run_one(src, out):
-            seen.append(len(core.parse_srt(src.read_text("utf-8"))))
-            core.write_srt(core.parse_srt(src.read_text("utf-8")), out)
+            seen.append(len(srt.parse_srt(src.read_text("utf-8"))))
+            srt.write_srt(srt.parse_srt(src.read_text("utf-8")), out)
             return True
 
         with redirect_stdout(io.StringIO()):
-            subtitle.translate_segments(self.cues(17), TMP / "seg2", run_one, size=8)
+            translate.translate_segments(self.cues(17), TMP / "seg2", run_one, size=8)
         self.assertEqual(seen, [8, 9])  # 末段只有 1 条（不足四分之一段），并入前一段
 
 
@@ -134,17 +135,17 @@ class Flow(unittest.TestCase):
 
     def test_plan_zh_source_has_no_translation(self):
         m = self.meta(subtitle={"source_lang": "zh", "asr_language": "zh", "method": "asr"})
-        self.assertEqual(state.plan(m), ["fetch", "asr"])
+        self.assertEqual(flow.plan(m), ["fetch", "asr"])
 
     def test_fetch_done_requires_full_duration(self):
         d = make_project("p1", self.meta())
-        self.assertFalse(state.is_done("fetch", d, core.load_meta(d)))
+        self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))
         make_video(d / "g.mkv", 3)  # 预期 10 秒，只有 3 秒 -> 半截
-        self.assertFalse(state.is_done("fetch", d, core.load_meta(d)))
+        self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))
         make_video(d / "g.mkv", 10)
-        self.assertTrue(state.is_done("fetch", d, core.load_meta(d)))
+        self.assertTrue(flow.STAGES["fetch"].done(d, project.load_meta(d)))
         (d / "_parts").mkdir()
-        self.assertFalse(state.is_done("fetch", d, core.load_meta(d)))
+        self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))
 
     def test_run_stops_at_gates_and_resumes(self):
         d = make_project("p2", self.meta(translate={"corrections": {"Chovie": "Chovy"}}))
@@ -162,11 +163,12 @@ class Flow(unittest.TestCase):
                 elif step == "fix":
                     shutil.copyfile(d / "en.srt", d / "en.srt.orig")
                 elif step == "translate":
-                    core.write_srt([dict(c, text="中文") for c in core.parse_srt(SRT)], d / "zh.srt")
+                    srt.write_srt([dict(c, text="中文") for c in srt.parse_srt(SRT)], d / "zh.srt")
             return f
 
-        orig = dict(cli.STAGE_FN)
-        cli.STAGE_FN.update({k: fake(k) for k in ("fetch", "asr", "terms", "fix", "translate")})
+        orig = dict(flow.STAGES)
+        flow.STAGES.update({k: dataclasses.replace(orig[k], run=fake(k))
+                            for k in ("fetch", "asr", "terms", "fix", "translate")})
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -196,15 +198,39 @@ class Flow(unittest.TestCase):
                 cli.main(["status", "p2"])
             self.assertNotIn("→", buf.getvalue())
         finally:
-            cli.STAGE_FN.update(orig)
+            flow.STAGES.update(orig)
 
     def test_check_detects_timing_change(self):
         d = make_project("p3", self.meta())
         (d / "en.srt").write_text(SRT, "utf-8")
-        bad = core.parse_srt(SRT)
+        bad = srt.parse_srt(SRT)
         bad[0]["start"] += 1
-        core.write_srt([dict(c, text="中") for c in bad], d / "zh.srt")
-        self.assertFalse(state.is_done("check", d, core.load_meta(d)))
+        srt.write_srt([dict(c, text="中") for c in bad], d / "zh.srt")
+        self.assertFalse(flow.STAGES["check"].done(d, project.load_meta(d)))
+
+
+class Layers(unittest.TestCase):
+    """依赖只往下走：cli → flow → stages → project / srt / keys / stitch → core。阶段之间互不引用。"""
+    ALLOWED = {"core": set(), "stitch": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"},
+               "stages": {"core", "project", "srt", "keys", "stitch"}, "flow": {"core", "project", "stages"},
+               "cli": {"core", "flow", "keys", "project"}}
+
+    def test_imports_only_go_down(self):
+        import ast
+        pkg = Path(core.__file__).parent
+        for f in pkg.rglob("*.py"):
+            rel = f.relative_to(pkg).parts
+            layer = rel[0][:-3] if len(rel) == 1 else rel[0]
+            if layer in ("__init__", "__main__", "workers"):
+                continue
+            for n in ast.walk(ast.parse(f.read_text("utf-8"))):
+                if isinstance(n, ast.ImportFrom) and n.level:
+                    where = "/".join(rel)
+                    self.assertFalse(len(rel) > 1 and n.level == 1, "%s 引用了同层的其他阶段" % where)
+                    targets = [n.module.split(".")[0]] if n.module else [a.name for a in n.names]
+                    for t in targets:
+                        if t != layer:
+                            self.assertIn(t, self.ALLOWED[layer], "%s 不能引用 %s" % (where, t))
 
 
 if __name__ == "__main__":

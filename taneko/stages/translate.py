@@ -1,81 +1,24 @@
 # -*- coding: utf-8 -*-
-"""字幕阶段：subs（抓取）/ asr（本地 Whisper）/ terms / fix / translate / check。
-逻辑从旧 pipeline.py 原样搬来，只改了路径和导入。"""
+"""translate：用 llm-subtrans + OpenAI 兼容接口把 en.srt 分段译成 zh.srt。"""
 from __future__ import annotations
 
 import json
 import os
-import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from .core import (CONFIG, get_api_key, VENDOR, FRAMEWORK_DIR, clean_auto, die, find_video, fmt_ts, load_config, load_meta,
-                   parse_srt, project_dir, read_cues, run, tool_cmd, write_srt)
-
-
-def cmd_subs(a) -> None:
-    d = project_dir(a.project)
-    meta = load_meta(d)
-    lang = meta.get("subtitle", {}).get("source_lang", "en")
-    raw = d / "sub_raw"
-    shutil.rmtree(str(raw), ignore_errors=True)
-    raw.mkdir()
-    base = tool_cmd("yt-dlp", "yt_dlp") + [
-        "--skip-download", "--no-playlist", "--convert-subs", "srt",
-        "-o", str(raw / "%(id)s.%(ext)s")]
-    auto = False
-    run(base + ["--write-subs", "--sub-langs", "%s,%s-US,%s-GB" % (lang, lang, lang),
-                meta["source_url"]], log=d / "logs" / "subs_manual.log")
-    files = sorted(raw.glob("*.srt"))
-    if not files:
-        print("没有人工字幕，改抓自动字幕……")
-        auto = True
-        run(base + ["--write-auto-subs", "--sub-langs", lang, meta["source_url"]],
-            log=d / "logs" / "subs_auto.log")
-        files = sorted(raw.glob("*.srt"))
-    if not files:
-        die("没抓到字幕。可以改用 Whisper / Subtitle Edit 从音频生成 en.srt，放进项目目录再继续。")
-    cues = parse_srt(files[0].read_text("utf-8-sig"))
-    if auto:
-        cues = clean_auto(cues)
-    write_srt(cues, d / "en.srt")
-    print("已生成 %s（%d 条，%s）" % (d / "en.srt", len(cues), "自动字幕，已清洗" if auto else "人工字幕"))
-    print("下一步：把 en.srt 译成 zh.srt（时间轴保持不变），再运行 check。")
-
-
-def problems(en: list, zh: list) -> list:
-    out = []
-    if len(en) != len(zh):
-        out.append("条数不一致：en=%d，zh=%d" % (len(en), len(zh)))
-    for i, (e, z) in enumerate(zip(en, zh), 1):
-        if abs(e["start"] - z["start"]) > 0.02 or abs(e["end"] - z["end"]) > 0.02:
-            out.append("#%d 时间轴被改动" % i)
-        if not z["text"].strip():
-            out.append("#%d 中文为空" % i)
-        dur = max(z["end"] - z["start"], 0.01)
-        if len(z["text"].replace("\n", "")) / dur > 16:
-            out.append("#%d 太长，读不完（%d 字 / %.1f 秒）" % (i, len(z["text"]), dur))
-    return out
-
-
-def cmd_check(a) -> None:
-    d = project_dir(a.project)
-    en, zh = read_cues(d / "en.srt"), read_cues(d / "zh.srt")
-    ps = problems(en, zh)
-    if ps:
-        print("发现 %d 个问题：" % len(ps))
-        for p in ps[:40]:
-            print("  - " + p)
-        if len(ps) > 40:
-            print("  ……其余 %d 个略" % (len(ps) - 40))
-        sys.exit(1)
-    print("检查通过：%d 条，时间轴一一对应。" % len(zh))
+from ..core import VENDOR, Stage, die, load_config
+from ..keys import get_api_key
+from ..project import load_meta, project_dir
+from ..srt import read_cues, write_srt
 
 
 PATCH_MARK = "# smo-patch: extra headers from env"
+
+
 BODY_MARK = "# smo-patch: extra body from env"
+
 
 
 def ensure_header_patch(tool: Path) -> None:
@@ -105,7 +48,6 @@ def ensure_header_patch(tool: Path) -> None:
                  "        except Exception:\n"
                  "            pass\n\n") + old, 1)
     f.write_text(t, "utf-8")
-
 
 
 def translate_segments(en, segdir, run_one, size=200):
@@ -225,99 +167,12 @@ def cmd_translate(a) -> None:
     print("已生成 %s（%d 条，时间轴沿用英文）。下一步：check，再 export。" % (d / "zh.srt", len(zh)))
 
 
-
-def cmd_asr(a) -> None:
-    """用本地 faster-whisper（GPU）把视频里的英文语音转成 en.srt。适合没有字幕可抓的视频。"""
-    d = project_dir(a.project)
-    meta = load_meta(d)
-    cfg = load_config("asr")
-    home = Path(cfg["home"])
-    py = home / "venv" / "Scripts" / "python.exe"
-    if not py.exists():
-        py = home / "venv" / "bin" / "python"
-    if not py.exists():
-        die("还没安装语音识别，请先双击 workflow\\setup_asr.bat（安装位置 %s）" % home)
-    video = find_video(d, meta)
-    if not video:
-        die("项目目录里没找到视频（meta.json 的 video_glob = %s）" % meta.get("video_glob", "*.mkv"))
-    lang = meta.get("subtitle", {}).get("asr_language") or cfg.get("language", "en")
-    base = "zh" if lang.startswith("zh") else "en"
-    if a.test:
-        out = d / ("%s_asr_test.srt" % base)
-    else:
-        out = d / ("%s.srt" % base)
-        if out.exists() and not a.force:
-            die("%s.srt 已存在。要覆盖请加 --force（会先备份成 %s.srt.bak）" % (base, base))
-        if out.exists():
-            shutil.copyfile(out, d / ("%s.srt.bak" % base))
-    pt = meta.get("translate", {})
-    hints = list(pt.get("names", [])) + ([pt["domain"]] if pt.get("domain") else [])
-    prompt = ("Terms: " + ", ".join(hints) + ".") if hints else ""
-    cmd = [str(py), str(Path(__file__).resolve().parent / "asr_run.py"), str(video), str(out),
-           "--model", cfg["model"], "--language", lang, "--device", cfg.get("device", "auto"),
-           "--compute", cfg.get("compute_type", "float16"), "--beam", str(cfg.get("beam_size", 5)),
-           "--max-chars", str(cfg.get("max_chars", 64)), "--max-dur", str(cfg.get("max_duration", 6.5)),
-           "--cache", str(home / "models"), "--prompt", prompt]
-    if a.test:
-        cmd += ["--limit", str(a.test * 60)]
-    env = dict(os.environ, HF_HOME=str(home / "hf"), PYTHONUTF8="1")
-    print("开始转写%s：%s" % ("（只转前 %d 分钟）" % a.test if a.test else "", video.name))
-    rc = subprocess.call(cmd, env=env)
-    if rc != 0 or not out.exists():
-        die("转写没有成功（退出码 %s）。把上面最后几行报错发给我。" % rc)
-    cues = read_cues(out)
-    print("\n共 %d 条。前 8 条：" % len(cues))
-    for c in cues[:8]:
-        print("  [%s] %s" % (fmt_ts(c["start"]), c["text"].replace("\n", " ")))
-    print("\n转写不是 100%% 准确：专有名词（人名、产品名）请对着原视频抽查，再改 %s 里的错字。" % out.name)
+def done(d: Path, meta: dict) -> bool:
+    return (d / "zh.srt").exists()
 
 
-def cmd_fix(a) -> None:
-    """精校第一步：按 meta.json 里 translate.corrections（错词->正确词）批量改 en.srt（首次会备份成 en.srt.orig）。"""
-    d = project_dir(a.project)
-    meta = load_meta(d)
-    corr = meta.get("translate", {}).get("corrections", {})
-    if not corr:
-        die("meta.json 的 translate.corrections 是空的。先运行 terms 找出听错的名字，再把 {\"错词\": \"正确词\"} 填进去")
-    src = d / "en.srt"
-    cues = read_cues(src)
-    if not cues:
-        die("en.srt 不存在或是空的")
-    if not (d / "en.srt.orig").exists():
-        shutil.copyfile(src, d / "en.srt.orig")
-    total = 0
-    for wrong, right in corr.items():
-        pat = re.compile(r"(?<![A-Za-z0-9])" + re.escape(wrong) + r"(?![A-Za-z0-9])")
-        n = 0
-        for c in cues:
-            c["text"], k = pat.subn(right, c["text"])
-            n += k
-        print("  %s -> %s：%d 处" % (wrong, right, n))
-        total += n
-    write_srt(cues, src)
-    print("共改了 %d 处，已写回 en.srt（原文备份：en.srt.orig）" % total)
+def args(p) -> None:
+    p.add_argument("--test", type=int, nargs="?", const=30, default=0); p.add_argument("--effort")
 
 
-def cmd_terms(a) -> None:
-    """精校第二步：统计字幕里反复出现的专有名词（大写开头的词），帮你发现听错的人名、英雄名。结果存 terms.txt。"""
-    from collections import Counter
-    d = project_dir(a.project)
-    meta = load_meta(d)
-    cues = read_cues(d / "en.srt")
-    if not cues:
-        die("en.srt 不存在或是空的")
-    known = {n.lower() for n in meta.get("translate", {}).get("names", [])}
-    cnt = Counter()
-    for c in cues:
-        words = re.findall(r"[A-Za-z][A-Za-z'\-]*", c["text"].replace("\n", " "))
-        for i, w in enumerate(words):
-            prev_end = i == 0
-            if w[0].isupper() and len(w) > 2 and not prev_end:
-                cnt[w] += 1
-    rows = [(w, n) for w, n in cnt.most_common() if n >= a.min and w.lower() not in known]
-    lines = ["%4d  %s" % (n, w) for w, n in rows]
-    (d / "terms.txt").write_text("\n".join(lines) + "\n", "utf-8")
-    print("出现 %d 次以上、且不在 names 里的大写词（前 %d 个，全部见 terms.txt）：" % (a.min, a.top))
-    print("\n".join(lines[:a.top]))
-    print("\n看到拼错的名字（如 Chovie、Kiinn），填进 meta.json 的 translate.corrections，再运行 fix。")
-
+STAGE = Stage("translate", "翻译成中文", done, cmd_translate, args)

@@ -8,15 +8,15 @@
 - 全部下完后按关键帧无损拼接成 <name>.mkv，并检查时间戳是否连续。
 - 旧的“半截文件”（<name>.mkv 比应有的短）会被当作种子接着用，不用从头来。
 """
-import json
 import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
 
-from . import stitch
-from .core import die, load_meta, project_dir, tool_cmd
+from .. import stitch
+from ..core import Stage, die, tool_cmd
+from ..project import find_video, load_meta, project_dir
 
 
 def _t2s(x) -> float:
@@ -29,6 +29,38 @@ def _t2s(x) -> float:
 def _s2t(x) -> str:
     x = int(x)
     return "%d:%02d:%02d" % (x // 3600, x % 3600 // 60, x % 60)
+
+
+def video_duration(path: Path):
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return None
+    r = subprocess.run([exe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+                       capture_output=True, text=True)
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def expected_duration(meta: dict):
+    """meta.section.download 形如 "4:13:00-5:08:00"；没有则返回 None（整条视频，不比时长）。"""
+    dl = (meta.get("section", {}) or {}).get("download")
+    if not dl:
+        return None
+    a, b = [_t2s(x) for x in dl.split("-")]
+    return b - a
+
+
+def done(d: Path, meta: dict) -> bool:
+    v = find_video(d, meta)
+    if not v or (d / "_parts").exists():
+        return False
+    exp = expected_duration(meta)
+    dur = video_duration(v)
+    if exp is None or dur is None:
+        return True
+    return dur >= exp - min(25.0, max(1.0, exp * 0.01))  # 容差：长视频 25 秒，短的按 1%
 
 
 def _verify_piece(path: Path, a: float, b: float, last: bool):
@@ -196,3 +228,13 @@ def cmd_fetch(a) -> None:
         except OSError:
             pass
     print("完成：%s" % out)
+
+
+def args(p) -> None:
+    p.add_argument("--format", default=None); p.add_argument("--browser", default=None)
+    p.add_argument("--chunk", type=int, default=600, help="每片秒数"); p.add_argument("--jobs", type=int, default=1)
+    p.add_argument("--retries", type=int, default=3); p.add_argument("--force", action="store_true")
+    p.add_argument("--no-seed", action="store_true"); p.add_argument("--keep", action="store_true")
+
+
+STAGE = Stage("fetch", "下载视频（可续传分片）", done, cmd_fetch, args)
