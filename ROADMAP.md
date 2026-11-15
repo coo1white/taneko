@@ -72,6 +72,7 @@ flowchart LR
 | 2026-11-15 | 翻译目前只验证 OpenCode Go 的 `deepseek-v4.1-flash` | 其他 OpenAI 兼容服务理论可用，未测试；OpenCode 专用请求头/参数需在阶段 3 隔离 |
 | 2026-11-15 | 人工检查点是流程的一部分 | 术语校对、抽查不可绕过 |
 | 2026-11-15 | 程序代码行数：上限 **2,000** 行，封顶 **2,500** 行 | 只统计 `taneko.py` 和 `taneko/` 下的 `.py`（按 `wc -l`，含空行），测试不算；当时 1,173 行。超过 2,000 行要在本表写明原因，超过 2,500 行测试失败、不能合并。另：单个文件 ≤400 行，单个函数 ≤80 行（当时已超的 `cmd_fetch` 147 行、`cmd_translate` 88 行要拆分），第三方 Python 依赖保持 0 个。超出时先把非核心功能（B 站上传、章节等）拆成插件，而不是调高上限。检查用的测试见 issue #6 |
+| 2026-11-15 | taneko 自己的代码保持全部 Python，不改写成 Go / Rust | 顺着生态走：同类 AI 字幕工具（whisperX、Buzz、pyvideotrans、VideoLingo、llm-subtrans）都是 Python，Whisper 也先有 Python 版。ffmpeg、yt-dlp 等外部工具照旧按命令行调用，与语言无关。难点在安装，不在语言：先 PyPI（`pipx` / `uv tool install`）+ `doctor`，一键包等有需要再做（issue #5） |
 
 ## 5. 已知限制
 
