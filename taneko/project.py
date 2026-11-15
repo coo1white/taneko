@@ -2,16 +2,42 @@
 """项目：projects/<名字>/ 文件夹和里面的 meta.json。"""
 from __future__ import annotations
 
+import glob
 import json
 from pathlib import Path
 
 from .core import PROJECTS, die
 
-def project_dir(name: str) -> Path:
-    d = PROJECTS / name
-    if not (d / "meta.json").exists():
-        die("找不到项目 %s（应有 %s）" % (name, d / "meta.json"))
-    return d
+DEPTH = 3  # 项目可以放在 projects/ 下最多 3 层，例如 projects/<系列>/<项目>/
+
+
+def _hidden(d: Path) -> bool:
+    return any(part.startswith(("_", ".")) for part in d.relative_to(PROJECTS).parts)
+
+
+def _find(pattern: str) -> list:
+    """projects/ 下各层里匹配 <pattern>/meta.json 的文件夹（跳过 _ 和 . 开头的）。"""
+    if not PROJECTS.is_dir():
+        return []
+    hits = []
+    for depth in range(DEPTH):
+        hits += [m.parent for m in PROJECTS.glob("/".join(["*"] * depth + [pattern, "meta.json"]))]
+    return sorted(d for d in hits if not _hidden(d))
+
+
+def project_dir(ref: str) -> Path:
+    """ref 是路径（含 / 或 \\，或 .）就直接用；否则按名字在 projects/ 下找。"""
+    if ref in (".", "..") or "/" in ref or "\\" in ref:
+        d = Path(ref).resolve()
+        if not (d / "meta.json").exists():
+            die("%s 里没有 meta.json，不是项目文件夹" % d)
+        return d
+    hits = _find(glob.escape(ref))
+    if not hits:
+        die("在 %s 下找不到项目 %s（找了 %d 层；也可以直接给项目文件夹的路径）" % (PROJECTS, ref, DEPTH))
+    if len(hits) > 1:
+        die("有 %d 个项目都叫 %s，请改给路径：%s" % (len(hits), ref, "、".join(map(str, hits))))
+    return hits[0]
 
 
 def load_meta(d: Path) -> dict:
@@ -34,7 +60,6 @@ def source_srt_name(meta: dict) -> str:
     return "zh.srt" if str(lang).startswith("zh") else "en.srt"
 
 
-def names() -> list:
-    """所有项目的名字（有 meta.json、不以 _ 开头的文件夹）。"""
-    return sorted(p.name for p in PROJECTS.iterdir()
-                  if p.is_dir() and not p.name.startswith("_") and (p / "meta.json").exists())
+def dirs() -> list:
+    """所有项目文件夹。"""
+    return _find("*")

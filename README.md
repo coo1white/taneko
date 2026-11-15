@@ -36,7 +36,7 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 
 ### 2. 建一个项目
 
-每个项目是 `projects/<项目名>/` 下的一个文件夹，里面放一个 `meta.json`。最小的例子：
+每个项目是一个文件夹，里面放一个 `meta.json`。文件夹放在 `projects/` 下，可以再分组，最多 3 层，例如 `projects/lol-worlds/game3/`。最小的例子：
 
 ```json
 {
@@ -57,6 +57,7 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 python taneko.py run my-project             # 往下跑，遇到人工检查点停下
 python taneko.py status                     # 所有项目的进度
 python taneko.py status my-project          # 单个项目的每一步
+python taneko.py run .                      # 在项目文件夹里运行；也可以给完整路径
 python taneko.py approve my-project terms   # 术语校对完，放行
 python taneko.py approve my-project spot    # 抽查完，放行
 ```

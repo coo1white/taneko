@@ -55,6 +55,43 @@ class ExitCodes(unittest.TestCase):
             self.assertEqual(cli.main(["run", "no-such-project"]), core.EXIT_FAIL)
 
 
+class Lookup(unittest.TestCase):
+    def setUp(self):
+        self.a = make_project("look-a", {"id": "a"})
+        self.b = make_project("series/look-b", {"id": "b"})
+        make_project("series/look-dup", {})
+        make_project("other/look-dup", {})
+        make_project("_old/look-hidden", {})
+
+    def tearDown(self):
+        for n in ("look-a", "series", "other", "_old"):
+            shutil.rmtree(core.PROJECTS / n)
+
+    def test_name_is_found_in_a_subfolder(self):
+        self.assertEqual(project.project_dir("look-a"), self.a)
+        self.assertEqual(project.project_dir("look-b"), self.b)
+
+    def test_path_and_dot_work(self):
+        self.assertEqual(project.project_dir(str(self.b)), self.b.resolve())
+        old = os.getcwd()
+        try:
+            os.chdir(self.b)
+            self.assertEqual(project.project_dir("."), self.b.resolve())
+        finally:
+            os.chdir(old)
+
+    def test_same_name_twice_is_an_error_not_a_guess(self):
+        with self.assertRaises(core.Fail) as e:
+            project.project_dir("look-dup")
+        self.assertIn("2", str(e.exception))
+
+    def test_underscore_folders_are_skipped(self):
+        with self.assertRaises(core.Fail):
+            project.project_dir("look-hidden")
+        self.assertNotIn("look-hidden", [d.name for d in project.dirs()])
+        self.assertIn(self.b, project.dirs())
+
+
 class ApiKey(unittest.TestCase):
     def test_env_wins_and_status_never_prints_the_key(self):
         name = core.load_config("translate")["key_env"]

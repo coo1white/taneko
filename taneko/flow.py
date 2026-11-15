@@ -63,7 +63,7 @@ def run(name: str, until=None, jobs: int = 1) -> int:
             return core.EXIT_NEEDS_HUMAN
         else:
             print("\n== %s ==" % st.label)
-            st.run(defaults(st, name, jobs))
+            st.run(defaults(st, str(d), jobs))  # 只找一次项目，各阶段直接用路径
             if not st.done(d, project.load_meta(d)):
                 core.die("阶段“%s”跑完了但结果没通过检查，请看上面的输出" % st.label)
         if until and step == until:
@@ -74,8 +74,8 @@ def run(name: str, until=None, jobs: int = 1) -> int:
 
 
 def status(name=None) -> None:
-    for n in [name] if name else project.names():
-        d = project.project_dir(n)
+    for d in [project.project_dir(name)] if name else project.dirs():
+        n = d.name
         snap = snapshot(d, project.load_meta(d))
         nxt = next((s for s, st in snap if st == "next"), None)
         print("%s  %s" % (n, "已完成" if nxt is None else "下一步：" + STAGES[nxt].label))
