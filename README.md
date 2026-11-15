@@ -26,7 +26,7 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 
 | 工具 | 哪一步要用 | 必须吗 |
 |---|---|---|
-| Python 3.8+ | 全部 | 必须 |
+| Python 3.11+（推荐 3.12） | 全部 | 必须 |
 | [FFmpeg](https://ffmpeg.org/)（含 ffprobe），放进 PATH | 下载、拼接、检查 | 必须 |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [deno](https://deno.com/) | 下载、抓字幕 | 必须 |
 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)（单独的 venv，建议 CUDA 显卡） | 转写 `asr` | 没有现成字幕时要 |
@@ -122,7 +122,7 @@ python taneko.py key clear    # 删除
 
 | 层 | 用到的东西 | 用来做什么 |
 |---|---|---|
-| 语言 | Python（目标 3.8+，日常在 3.12 上运行），只用标准库 | 整个框架，没有第三方 Python 依赖 |
+| 语言 | Python 3.11+（开发和日常运行用 3.12），只用标准库 | 整个框架，没有第三方 Python 依赖 |
 | 下载 | yt-dlp（Unlicense）+ deno + 浏览器 cookies | 取视频流，子进程调用 |
 | 媒体处理 | FFmpeg / ffprobe（LGPL 2.1+，视构建方式可能为 GPL）：`-copyts`、stream copy、concat demuxer、缩略图比对 | 分片保留绝对时间戳、无损截取与拼接，子进程调用 |
 | 语音识别 | faster-whisper + CTranslate2，模型 large-v3，CUDA（float16），失败时退回 CPU | 本地转写 |
