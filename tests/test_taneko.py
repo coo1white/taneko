@@ -123,6 +123,52 @@ class ApiKey(unittest.TestCase):
             os.environ.update(old)
 
 
+class KeyCheck(unittest.TestCase):
+    """key check 用本机的假服务器测试：好密钥 200，坏密钥 401，额度满 429，连不上。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import http.server, threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                auth = self.headers.get("Authorization")
+                self.send_response({"Bearer good": 200, "Bearer busy": 429}.get(auth, 401))
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        for k in ("no_proxy", "NO_PROXY"):                   # 本机有代理时，别把假服务器的请求交给代理
+            os.environ[k] = ",".join(filter(None, [os.environ.get(k), "127.0.0.1"]))
+        cls.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.cfg = {"server": "http://127.0.0.1:%d" % cls.srv.server_port, "endpoint": "/v1/chat/completions", "model": "m"}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def run_check(self, key, cfg=None):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = keys.check(cfg or self.cfg, key, timeout=5)
+        self.assertNotIn(key, buf.getvalue())               # 从不显示密钥
+        return rc, buf.getvalue()
+
+    def test_good_bad_busy_and_offline(self):
+        self.assertEqual(self.run_check("good")[0], core.EXIT_OK)
+        rc, out = self.run_check("bad-SECRET")
+        self.assertEqual(rc, core.EXIT_FAIL)
+        self.assertIn("401", out)
+        self.assertIn("429", self.run_check("busy")[1])
+        rc, out = self.run_check("good", dict(self.cfg, server="http://127.0.0.1:1"))
+        self.assertEqual(rc, core.EXIT_FAIL)
+        self.assertIn("连不上", out)
+
+
 class Segments(unittest.TestCase):
     def cues(self, n):
         return [{"start": float(i), "end": i + 0.5, "text": "en%d" % i} for i in range(n)]

@@ -95,6 +95,7 @@ python taneko.py approve my-project spot    # 抽查完，放行
 ```bash
 python taneko.py key set      # 保存（输入时不显示）
 python taneko.py key status   # 只显示有没有、多长、从哪来，不显示内容
+python taneko.py key check    # 问一次服务器密钥是否有效（只用 1 个 token）
 python taneko.py key clear    # 删除
 ```
 

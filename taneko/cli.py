@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sp.add_parser("approve", help="通过人工检查点")
     p.add_argument("project"); p.add_argument("what", choices=["terms", "spot"]); p.set_defaults(fn=cmd_approve)
     p = sp.add_parser("key", help="管理翻译用的 API 密钥（输入时不显示）")
-    p.add_argument("action", choices=["set", "status", "clear"]); p.set_defaults(fn=keys.cmd_key)
+    p.add_argument("action", choices=["set", "status", "check", "clear"]); p.set_defaults(fn=keys.cmd_key)
     for st in flow.STAGES.values():
         if st.run:
             p = sp.add_parser(st.name, help=st.label)
