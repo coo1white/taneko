@@ -1,21 +1,22 @@
 # taneko 架构（v0.1）
 
-## 1. 代码目录（`D:\Ops_OPC\framework\`）
+## 1. 代码目录（仓库根目录）
 
 ```
-framework/
+taneko/                       仓库根目录
 ├── taneko.py                 入口（python taneko.py ...）
 ├── README.md
 ├── ARCHITECTURE.md           本文件
+├── ROADMAP.md                现状评估、路线图、决策记录
 ├── config/
-│   ├── asr.json              Whisper：模型、设备、分句长度
-│   └── translate.json        翻译：接口、模型、通用要求
+│   ├── asr.json              Whisper：安装目录、模型、设备、分句长度
+│   └── translate.json        翻译：接口、模型、通用要求、分段大小与超时
 ├── tests/
-│   └── test_taneko.py        5 个测试（SRT、完成判断、检查点、重跑跳过）
+│   └── test_taneko.py        自动测试（SRT、退出码、密钥、分段翻译、完成判断、检查点、重跑跳过）
 └── taneko/
-    ├── cli.py                命令：run / status / approve / 各单独阶段
+    ├── cli.py                命令：run / status / approve / key / 各单独阶段
     ├── state.py              流程计划 + 每阶段"做完了吗"的判断
-    ├── core.py               路径、meta.json、SRT 读写、外部工具查找
+    ├── core.py               路径、退出码、密钥读取、meta.json、SRT 读写、外部工具查找
     ├── download.py           fetch：分片下载、校验、重试、续传
     ├── stitch.py             拼接：旧半截文件对齐、关键帧无缝合并
     ├── subtitle.py           subs / asr / terms / fix / translate / check
@@ -33,7 +34,7 @@ cli ──→ state ──→ core
 
 外部工具（只被子进程调用，不链接）：
   download  → yt-dlp、ffmpeg、ffprobe、Firefox cookies
-  subtitle  → Whisper（D:\Tools\whisper）、llm-subtrans（workflow\vendor）、API 密钥（环境变量）
+  subtitle  → Whisper（config/asr.json 的 home）、llm-subtrans（TANEKO_VENDOR）、API 密钥（环境变量）
 ```
 
 ## 3. 一次 `run` 的流程
@@ -48,25 +49,28 @@ fetch ──→ asr（或 subs）──→ terms ──→ ⏸ 术语校对 ─�
   · 每步先问 state："做完了吗？" 是就跳过，否就执行
   · 中文原文（source_lang=zh）只走 fetch → asr
   · 重跑同一条命令 = 续跑
+  · 退出码：全部完成 0，停在人工检查点 10，出错 1，参数不对 2
 ```
 
-## 4. 项目文件夹（`projects\<项目>\`）
+## 4. 项目文件夹（`projects/<项目>/`）
 
 ```
 meta.json        项目配置：来源、片段范围、术语表、检查点放行记录（review）
 <name>.mkv       下载完成的视频
-_parts\          下载中的分片（完成后自动删除）
+_parts/          下载中的分片（完成后自动删除）
 en.srt           英文字幕（转写或抓取）
 en.srt.orig      fix 之前的备份
 terms.txt        高频专有名词清单
-zh.srt           中文字幕
+_translate/      分段翻译的中间结果（每段一对 en_NN.srt / zh_NN.srt，重跑时跳过已译完的段）
+zh_raw.srt       合并后的译文
+zh.srt           中文字幕（时间轴沿用 en.srt）
 ```
 
 ## 5. 阶段的“完成”标准
 
 | 阶段 | 判定为完成 |
 |---|---|
-| fetch | 有视频、没有 `_parts`、时长不比预期短（长视频容差 25 秒，短的按 1%） |
+| fetch | 有视频、没有 `_parts`、时长不比预期短（长视频容差 25 秒，短的按 1%；与 fetch 自己的判断不一致，见 issue #1） |
 | asr / subs | `en.srt`（中文原文是 `zh.srt`）存在且非空 |
 | terms | `terms.txt` 存在 |
 | ⏸ 术语 | `meta.review.terms` 为真（`taneko approve <项目> terms`） |
@@ -75,18 +79,16 @@ zh.srt           中文字幕
 | check | 中英条数、时间轴一一对应，字数不超读速 |
 | ⏸ 抽查 | `meta.review.spot` 为真（`taneko approve <项目> spot`） |
 
-## 6. 留在旧 `workflow\` 的部分（暂未纳入框架）
+## 6. 不在本仓库的部分
 
-```
-workflow\pipeline.py   probe（4K/Hi-Res 质检）、chapters、upload、subtitle（B 站字幕轨）、login
-workflow\vendor\       llm-subtrans（框架通过 TANEKO_VENDOR 指向它）
-```
+作者旧的工作流脚本里还有一些功能，暂未迁入：画质检查（4K / Hi-Res）、章节、B 站上传和字幕轨、登录。
+llm-subtrans 也不在本仓库，框架通过 `TANEKO_VENDOR` 找到它。
 
 ## 7. 设计原则
 
 - 阶段只读写项目文件夹，不互相调用；顺序由 `state.plan` 决定。
 - 失败只影响当前阶段（下载按分片，其余按文件），重跑即续。
-- 需要人判断的地方做成检查点，而不是绕过去。
+- 需要人判断的地方做成检查点，而不是绕过去；脚本和 agent 靠退出码 10 知道“该人来了”。
 - 外部工具都以子进程调用，框架本身只用 Python 标准库。
 - 密钥只走环境变量，不写文件。
 
