@@ -32,6 +32,28 @@ class Srt(unittest.TestCase):
         self.assertEqual(core.parse_srt(p.read_text("utf-8")), cues)
 
 
+class ExitCodes(unittest.TestCase):
+    def test_codes_are_distinct_and_stable(self):
+        self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE, core.EXIT_NEEDS_HUMAN), (0, 1, 2, 10))
+
+    def test_die_exits_with_fail(self):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            core.die("x")
+        self.assertEqual(cm.exception.code, core.EXIT_FAIL)
+
+    def test_bad_args_exit_2(self):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            import contextlib
+            with contextlib.redirect_stderr(io.StringIO()):
+                cli.main(["run"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_unknown_project_exits_fail(self):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as cm:
+            cli.main(["run", "no-such-project"])
+        self.assertEqual(cm.exception.code, core.EXIT_FAIL)
+
+
 class Flow(unittest.TestCase):
     def meta(self, **kw):
         m = {"source_url": "u", "video_glob": "*.mkv", "section": {"download": "0:00:00-0:00:10", "name": "g"},
@@ -77,7 +99,8 @@ class Flow(unittest.TestCase):
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                cli.main(["run", "p2"])
+                rc = cli.main(["run", "p2"])
+            self.assertEqual(rc, core.EXIT_NEEDS_HUMAN)  # 停在人工检查点：退出码 10
             self.assertEqual(calls, ["fetch", "asr", "terms"])  # 在术语检查点停下
             self.assertIn("approve p2 terms", buf.getvalue())
             with redirect_stdout(io.StringIO()):
@@ -86,14 +109,16 @@ class Flow(unittest.TestCase):
             self.assertEqual(calls, ["fetch", "asr", "terms", "fix", "translate"])  # check 是真实逻辑，不用假的
             buf = io.StringIO()
             with redirect_stdout(buf):
-                cli.main(["run", "p2"])
+                rc = cli.main(["run", "p2"])
+            self.assertEqual(rc, core.EXIT_NEEDS_HUMAN)  # 抽查检查点：也是 10
             self.assertEqual(calls, ["fetch", "asr", "terms", "fix", "translate"])  # 重跑：已完成的全部跳过
             self.assertIn("approve p2 spot", buf.getvalue())
             with redirect_stdout(io.StringIO()):
                 cli.main(["approve", "p2", "spot"])
                 buf = io.StringIO()
             with redirect_stdout(buf):
-                cli.main(["run", "p2"])
+                rc = cli.main(["run", "p2"])
+            self.assertEqual(rc, core.EXIT_OK)  # 全部完成：0
             self.assertIn("全部完成", buf.getvalue())
             buf = io.StringIO()
             with redirect_stdout(buf):

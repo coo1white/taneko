@@ -65,6 +65,17 @@ python taneko.py approve lol-worlds-2026-g1 terms   # 术语校对完，放行
 python taneko.py approve lol-worlds-2026-g1 spot    # 抽查完，放行
 ```
 
+### 退出码
+
+脚本和 agent 靠退出码判断下一步：
+
+| 退出码 | 含义 | 该怎么办 |
+|---|---|---|
+| `0` | 成功；`run` 表示全部完成 | 没有下一步 |
+| `1` | 出错（输出里有“错误：……”） | 看报错，修了再重跑 |
+| `2` | 命令行参数不对 | 看 `--help` |
+| `10` | `run` 停在人工检查点（不是失败） | 人处理后 `approve`，再重新 `run` |
+
 单个阶段也能单独跑：`fetch / subs / asr / terms / fix / translate / check`。
 翻译前想先试风格：`python taneko.py translate <项目> --test`。
 

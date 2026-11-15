@@ -43,7 +43,7 @@ def cmd_status(a) -> None:
                 print("   %s %s" % (MARK[st], state.LABELS[s]))
 
 
-def cmd_run(a) -> None:
+def cmd_run(a) -> int:
     d = core.project_dir(a.project)
     for step in state.plan(core.load_meta(d)):
         meta = core.load_meta(d)  # 人工检查点之后 meta 可能被改过，每步重读
@@ -58,7 +58,7 @@ def cmd_run(a) -> None:
             else:
                 print("   对着视频抽查 %s 里的击杀、大龙等关键片段" % (d / "zh.srt"))
             print("   3) 完成后运行：taneko approve %s %s，再重新 taneko run %s" % (a.project, what, a.project))
-            return
+            return core.EXIT_NEEDS_HUMAN
         else:
             print("\n== %s ==" % state.LABELS[step])
             STAGE_FN[step](stage_args(step, a.project, a.jobs))
@@ -66,8 +66,9 @@ def cmd_run(a) -> None:
                 core.die("阶段“%s”跑完了但结果没通过检查，请看上面的输出" % state.LABELS[step])
         if a.until and step == a.until:
             print("已到指定的 --until 阶段，停止。")
-            return
+            return core.EXIT_OK
     print("\n全部完成。")
+    return core.EXIT_OK
 
 
 def cmd_approve(a) -> None:
@@ -109,9 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv=None) -> None:
+def main(argv=None) -> int:
+    """返回退出码；入口脚本用 sys.exit(main())。出错时 core.die 直接以 1 退出。"""
     args = build_parser().parse_args(argv)
-    args.fn(args)
+    rc = args.fn(args)
+    return rc if isinstance(rc, int) else core.EXIT_OK
 
 
 if __name__ == "__main__":

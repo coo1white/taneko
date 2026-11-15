@@ -24,9 +24,16 @@ CONFIG = Path(os.environ.get("TANEKO_CONFIG") or (FRAMEWORK_DIR / "config"))
 VENDOR = Path(os.environ.get("TANEKO_VENDOR") or (ROOT / "workflow" / "vendor"))
 
 
+# 退出码约定（agent 和脚本据此判断下一步）
+EXIT_OK = 0           # 成功；run：全部完成
+EXIT_FAIL = 1         # 出错（见上面的“错误：……”）
+EXIT_USAGE = 2        # 命令行参数不对（argparse）
+EXIT_NEEDS_HUMAN = 10  # run 停在人工检查点：不是失败，需要人处理后 approve 再重跑
+
+
 def die(msg: str) -> None:
     print("错误：" + msg)
-    sys.exit(1)
+    sys.exit(EXIT_FAIL)
 
 
 # ---------------------------------------------------------------- 项目与 meta
