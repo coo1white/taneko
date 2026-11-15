@@ -75,6 +75,7 @@ flowchart LR
 | 2026-11-15 | taneko 自己的代码保持全部 Python，不改写成 Go / Rust | 顺着生态走：同类 AI 字幕工具（whisperX、Buzz、pyvideotrans、VideoLingo、llm-subtrans）都是 Python，Whisper 也先有 Python 版。ffmpeg、yt-dlp 等外部工具照旧按命令行调用，与语言无关。难点在安装，不在语言：先 PyPI（`pipx` / `uv tool install`）+ `doctor`，一键包等有需要再做（issue #5） |
 | 2026-11-15 | Python 版本：开发用 **3.12**，最低支持 **3.11**，CI 加测最新稳定版（`3.x`，见 `.github/workflows/test.yml`） | 3.12 最主流：PyPI 下载量里 yt-dlp 47%、faster-whisper 41%、ctranslate2 37% 来自 3.12，3.11 次之。yt-dlp 2026.10.26 要求 ≥3.11；3.10 已于 2026-10-01 停止维护。不追最新：GPU 库对新版本的支持往往晚几个月。代码不用 3.11 之后才有的功能。转写用的 Whisper venv 是单独的环境，版本可以不同。3.11 于 2027-10 停止维护时，把最低版本提到 3.12 |
 | 2026-11-15 | 转写分成“后端”和“断句”两半：后端只返回带时间戳的词，断句始终用 taneko 自己的 `build_cues` | 换后端不改变字幕长度、断句和读速，后面的阶段不用动。后端：faster-whisper（CUDA，已验证）、whisper.cpp（没有 NVIDIA 显卡时的主力）、Modal（租用云端 GPU，跑同一个模型，结果和本地一致）。第三方转写接口违背本地优先，等有人需要再加。实测（速度、听错的名字、字幕卡点）后，若 whisper.cpp 在 CUDA 上不输 faster-whisper，只留 whisper.cpp 一个本地后端（issue #7） |
+| 2026-11-15 | 合并方式按改动大小分三档 | 文档和小改动：直接推到 main。改代码：先推分支，CI 通过后快进到 main，不开 PR。开 PR：有外部贡献者、想让另一个模型审代码、发布前要留完整记录。要关的 issue 写在提交信息里（`Closes #N`）。有外部贡献者之后，给 main 开分支保护，要求 CI 通过才能合并 |
 
 ## 5. 已知限制
 
