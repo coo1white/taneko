@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 临时/中间文件
+_old_*.md
+*.bak
+*.orig
+
+# 密钥与登录信息（永远不要提交）
+cookies.json
+*cookies*.txt
+.env
+*.key
+
+# 项目数据与大文件（视频、字幕等放在 projects\ 里，不在本仓库）
+projects/
+*.mkv
+*.mp4
+*.m4a
+
+# more media / local artifacts
+*.srt
+*.part
+*.webm
+*.mov
+*.wav
+*.pem
+.env.*
+_parts/
+*.log
+.idea/
+.vscode/
+.DS_Store
+.pytest_cache/
+__pycache__/
