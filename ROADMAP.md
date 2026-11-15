@@ -49,7 +49,7 @@ flowchart LR
 | 0 收尾 | 第一局（game 1）走完全流程；~~推送到 GitHub；MIT~~（已完成） | 必做 / 小 |
 | 1 契约与可靠性 | ~~退出码约定~~、~~非交互模式~~（已完成）；修 issue #1 #2 #3；`--json`（issue #4）、`taneko doctor`、`init`、路径可配置（issue #5） | 高 / 中 |
 | 2 agent 友好 | `AGENTS.md`、错误码、`taneko next`（直接给出下一步命令或“需要人”）；之后评估做成 MCP / Claude Code skill | 高 / 中 |
-| 3 可替换后端 | 转写（faster-whisper / whisper.cpp）、翻译（OpenAI 兼容服务）、来源（yt-dlp / 本地文件）；术语表做成可共享的“领域包” | 中 / 大 |
+| 3 可替换后端 | 转写（faster-whisper / whisper.cpp；macOS 的转写支持随 whisper.cpp 一起做；CI 已先覆盖 macOS）、翻译（OpenAI 兼容服务）、来源（yt-dlp / 本地文件）；术语表做成可共享的“领域包” | 中 / 大 |
 | 4 质量评估 | 术语命中率、读速违规数；高风险行抽样器（人名、数字、击杀）；双语对照静态网页（点时间戳跳转） | 高 / 大 |
 | 5 开源就绪 | CI（Windows + Ubuntu）、安装脚本 / pipx、提示中英文化、v0.2、PyPI | 中 / 中 |
 | 之后 | B 站上传、章节生成等从旧 workflow 迁入，做成插件 | 视需求 |
