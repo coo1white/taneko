@@ -15,6 +15,8 @@ MARK = {"done": "✓", "skip": "–", "next": "→", "todo": "·"}
 
 def plan(meta: dict) -> list:
     sub = meta.get("subtitle", {}) or {}
+    if sub.get("method") == "none":
+        return ["fetch"]  # 只下载，不做字幕
     steps = ["fetch", "asr" if sub.get("method") == "asr" else "subs"]
     if str(sub.get("source_lang", "en")).startswith("zh"):
         return steps  # 原文已是中文，不需要翻译

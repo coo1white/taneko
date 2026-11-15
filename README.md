@@ -49,6 +49,7 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 
 - 不写 `section.download` 就下整条视频。
 - 原视频有字幕时，`method` 写 `subs`，直接抓字幕，不用转写。
+- 只要视频、不要字幕时，`method` 写 `none`，只下载。
 - 原文是中文时，`source_lang` 写 `zh`，只下载和转写，不翻译。
 
 ### 3. 跑起来

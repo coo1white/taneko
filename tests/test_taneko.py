@@ -220,6 +220,9 @@ class Flow(unittest.TestCase):
         m = self.meta(subtitle={"source_lang": "zh", "asr_language": "zh", "method": "asr"})
         self.assertEqual(flow.plan(m), ["fetch", "asr"])
 
+    def test_plan_method_none_is_download_only(self):
+        self.assertEqual(flow.plan({"subtitle": {"method": "none", "source_lang": "en"}}), ["fetch"])
+
     def test_fetch_done_requires_full_duration(self):
         d = make_project("p1", self.meta())
         self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))
