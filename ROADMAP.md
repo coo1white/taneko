@@ -49,10 +49,10 @@ flowchart LR
 | 0 收尾 | 第一局（game 1）走完全流程；~~推送到 GitHub；MIT~~（已完成） | 必做 / 小 |
 | 1 契约与可靠性 | ~~退出码约定~~、~~非交互模式~~（已完成）；修 issue #1 #2 #3；`--json`（issue #4）、`taneko doctor`、`init`、路径可配置（issue #5） | 高 / 中 |
 | 2 agent 友好 | `AGENTS.md`、错误码、`taneko next`（直接给出下一步命令或“需要人”）；之后评估做成 MCP / Claude Code skill | 高 / 中 |
-| 3 可替换后端 | 转写（faster-whisper / whisper.cpp；macOS 的转写支持随 whisper.cpp 一起做；CI 已先覆盖 macOS）、翻译（OpenAI 兼容服务）、来源（yt-dlp / 本地文件）；术语表做成可共享的“领域包” | 中 / 大 |
+| 3 可替换后端 | 转写后端（issue #7）：本地 faster-whisper（CUDA）+ whisper.cpp（Metal / Vulkan / CPU，macOS 转写随它一起做），租用云端 GPU（Modal）；翻译（OpenAI 兼容服务）、来源（yt-dlp / 本地文件）；术语表做成可共享的“领域包” | 中 / 大 |
 | 4 质量评估 | 术语命中率、读速违规数；高风险行抽样器（人名、数字、击杀）；双语对照静态网页（点时间戳跳转） | 高 / 大 |
-| 5 开源就绪 | CI（Windows + Ubuntu）、安装脚本 / pipx、提示中英文化、v0.2、PyPI | 中 / 中 |
-| 之后 | B 站上传、章节生成等从旧 workflow 迁入，做成插件 | 视需求 |
+| 5 开源就绪 | ~~CI（Ubuntu + Windows + macOS）~~（已完成）、安装脚本 / pipx、提示中英文化、v0.2、PyPI | 中 / 中 |
+| 之后 | B 站上传、章节生成等从旧 workflow 迁入，做成插件；第三方转写接口（OpenAI、Groq 等） | 视需求 |
 
 优先级共识：**先做 1 和 2**（改动小，同时提升人和 agent 的体验）；4 要等第一局的真实质量数据再定指标。
 
@@ -74,6 +74,7 @@ flowchart LR
 | 2026-11-15 | 程序代码行数：上限 **2,000** 行，封顶 **2,500** 行 | 只统计 `taneko.py` 和 `taneko/` 下的 `.py`（按 `wc -l`，含空行），测试不算；当时 1,173 行。超过 2,000 行要在本表写明原因，超过 2,500 行测试失败、不能合并。另：单个文件 ≤400 行，单个函数 ≤80 行（当时已超的 `cmd_fetch` 147 行、`cmd_translate` 88 行要拆分），第三方 Python 依赖保持 0 个。超出时先把非核心功能（B 站上传、章节等）拆成插件，而不是调高上限。检查用的测试见 issue #6 |
 | 2026-11-15 | taneko 自己的代码保持全部 Python，不改写成 Go / Rust | 顺着生态走：同类 AI 字幕工具（whisperX、Buzz、pyvideotrans、VideoLingo、llm-subtrans）都是 Python，Whisper 也先有 Python 版。ffmpeg、yt-dlp 等外部工具照旧按命令行调用，与语言无关。难点在安装，不在语言：先 PyPI（`pipx` / `uv tool install`）+ `doctor`，一键包等有需要再做（issue #5） |
 | 2026-11-15 | Python 版本：开发用 **3.12**，最低支持 **3.11**，CI 加测最新稳定版（`3.x`，见 `.github/workflows/test.yml`） | 3.12 最主流：PyPI 下载量里 yt-dlp 47%、faster-whisper 41%、ctranslate2 37% 来自 3.12，3.11 次之。yt-dlp 2026.10.26 要求 ≥3.11；3.10 已于 2026-10-01 停止维护。不追最新：GPU 库对新版本的支持往往晚几个月。代码不用 3.11 之后才有的功能。转写用的 Whisper venv 是单独的环境，版本可以不同。3.11 于 2027-10 停止维护时，把最低版本提到 3.12 |
+| 2026-11-15 | 转写分成“后端”和“断句”两半：后端只返回带时间戳的词，断句始终用 taneko 自己的 `build_cues` | 换后端不改变字幕长度、断句和读速，后面的阶段不用动。后端：faster-whisper（CUDA，已验证）、whisper.cpp（没有 NVIDIA 显卡时的主力）、Modal（租用云端 GPU，跑同一个模型，结果和本地一致）。第三方转写接口违背本地优先，等有人需要再加。实测（速度、听错的名字、字幕卡点）后，若 whisper.cpp 在 CUDA 上不输 faster-whisper，只留 whisper.cpp 一个本地后端（issue #7） |
 
 ## 5. 已知限制
 
