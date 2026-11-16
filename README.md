@@ -17,89 +17,100 @@
 - **旧的半截文件接着用**：以前没下完的文件放进项目文件夹，Taneko 找到它对应的时间，只补缺的部分。
 - **画质不变**：不重新编码。下完自动检查画面有没有断档、声音有没有空白。
 
-## 快速上手（5 分钟）
+## 适合你吗？
 
-下面是最常见的用法：只下视频，不做字幕。
+- **适合**：只要长视频里的一段，比如 9 小时直播里的一局；或者网络不稳，下大文件常常断。
+- **不太需要**：只下完整的短视频、网络也稳。直接用 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 就够了，Taneko 本来也是用它取视频。
 
-先建一个空文件夹（下文叫“你的文件夹”），在里面打开终端：Windows 用 PowerShell 或 cmd，macOS 和 Linux 用终端。下面所有命令都在这个文件夹里运行。
+## 快速上手
 
-### 1. 装工具
+下面是最常见的用法：只下视频，不做字幕。共 3 步。
 
-| 工具 | 说明 |
-|---|---|
-| [Python](https://www.python.org/downloads/) 3.11 或更新 | 运行 Taneko |
-| [FFmpeg](https://ffmpeg.org/download.html) | 截取和检查视频 |
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) 和 [deno](https://deno.com/) | 从网站取视频 |
-| Firefox（可选） | Taneko 默认读取 Firefox 的登录信息，能下更多视频，比如会员视频 |
+### 1. 安装
 
-Windows 上可以一次装好（Python 另装）：
+先装 FFmpeg、deno 和 pipx，再用 pipx 装 Taneko。yt-dlp 会跟着 Taneko 一起装上。
+
+**Windows**（PowerShell 或 cmd）：
 
 ```bash
-winget install Gyan.FFmpeg yt-dlp.yt-dlp DenoLand.Deno
+winget install Python.Python.3.12 Gyan.FFmpeg DenoLand.Deno
 ```
 
-### 2. 下载 Taneko
+关掉终端，重新打开一个，再运行：
 
 ```bash
-git clone https://github.com/coo1white/taneko.git
+py -m pip install --user pipx
+py -m pipx ensurepath
 ```
 
-没有 git 时，在 GitHub 页面点 **Code → Download ZIP**，解压即可。
-
-然后检查工具装齐没有：
+再关掉终端、重新打开，然后：
 
 ```bash
-python taneko/taneko.py doctor
+pipx install taneko
 ```
 
-缺什么，它会告诉你怎么装。这几项可以先不管：
-
-- Whisper 和 llm-subtrans：只有做字幕才要。
-- 项目目录：第 3 步才建。
-
-Windows 上如果 `python` 不能用，换成 `py`。
-
-### 3. 建一个项目
+**macOS**：
 
 ```bash
-python taneko/taneko.py init game3 "https://www.youtube.com/watch?v=..." --section 4:13:00-5:08:00
+brew install ffmpeg deno pipx
+pipx ensurepath
+pipx install taneko
+```
+
+**Linux**（Ubuntu / Debian）：
+
+```bash
+sudo apt install ffmpeg pipx
+curl -fsSL https://deno.land/install.sh | sh
+pipx ensurepath
+pipx install taneko
+```
+
+装好后检查一遍：
+
+```bash
+taneko doctor
+```
+
+缺什么，它会告诉你怎么装。Whisper 和 llm-subtrans 只有做字幕才要，可以不管。
+
+Taneko 默认读取 Firefox 的登录信息（cookies），能下更多视频，比如会员视频。不用 Firefox 也能下。
+
+### 2. 建一个项目
+
+```bash
+taneko init game3 "https://www.youtube.com/watch?v=..." --section 4:13:00-5:08:00
 ```
 
 - `game3`：项目名，也是下好的文件名（`game3.mkv`）。
 - 网址：前后加英文引号，免得 `&` 之类的符号被终端误读。
 - `--section`：开始-结束时间，可写 `4:13:00`、`13:00` 或 `780`（秒）。多短都行，比如 `4:13:00-4:14:00` 只下 1 分钟。不写就下整条视频。
 
-它会在 `taneko` 文件夹旁边建好项目：
+项目建在用户目录下的 `taneko/projects/game3/`（Windows 是 `C:\Users\你的用户名\taneko\projects\game3\`）。屏幕上会显示完整路径。
 
-```text
-你的文件夹/
-├── taneko/              ← 第 2 步下载的代码
-└── projects/
-    └── game3/
-        └── meta.json    ← 这个项目的设置
-```
-
-### 4. 下载
+### 3. 下载
 
 ```bash
-python taneko/taneko.py run game3
+taneko run game3
 ```
 
-下好后，视频在 `projects/game3/game3.mkv`。屏幕最后会显示检查结果，例如：
+屏幕最后会显示检查结果和文件位置，例如：
 
 ```text
 检查结果：视频时长 64.5 秒；音频从 4.5 秒到 64.5 秒
-完成：projects/game3/game3.mkv
+完成：C:\Users\你的用户名\taneko\projects\game3\game3.mkv
 ```
 
 视频比你要的长几秒，这是正常的：画面要从开始时间之前最近的关键帧开始，才能不重新编码。声音正好从开始时间开始。检查没通过时，会显示“错误：”和原因，不会覆盖旧文件。
 
 **中途断了？** 再跑一次同样的命令。
 
+**卸载**：`pipx uninstall taneko`。下好的视频在 `taneko/projects/` 里，不会被删。
+
 ## 常见问题
 
 **怎么看下到哪了？**
-`python taneko/taneko.py status` 列出所有项目的进度。
+`taneko status` 列出所有项目的进度。
 
 **我有一个以前没下完的文件，能用吗？**
 能。把它改名成 `name` 写的名字（例如 `game3.mkv`），放进项目文件夹，再跑 `run`。
@@ -116,13 +127,13 @@ python taneko/taneko.py run game3
 <summary><b>所有命令</b></summary>
 
 ```bash
-python taneko/taneko.py init game3 网址 --section 开始-结束   # 新建项目
-python taneko/taneko.py run game3            # 跑完所有步骤，已完成的跳过
-python taneko/taneko.py run .                # 在项目文件夹里运行；也可以给完整路径
-python taneko/taneko.py status game3         # 一个项目的每一步
-python taneko/taneko.py status --json        # 进度的 JSON 版，给脚本和 agent 读
-python taneko/taneko.py fetch game3 --jobs 2 # 只跑下载这一步
-python taneko/taneko.py doctor               # 检查工具
+taneko init game3 网址 --section 开始-结束   # 新建项目
+taneko run game3            # 跑完所有步骤，已完成的跳过
+taneko run .                # 在项目文件夹里运行；也可以给完整路径
+taneko status game3         # 一个项目的每一步
+taneko status --json        # 进度的 JSON 版，给脚本和 agent 读
+taneko fetch game3 --jobs 2 # 只跑下载这一步
+taneko doctor               # 检查工具
 ```
 
 `fetch` 的常用选项：`--force` 重新下载，`--sections` 改用分段下载，`--keep` 保留中间文件。
@@ -141,6 +152,19 @@ python taneko/taneko.py doctor               # 检查工具
 ```
 
 `"method": "none"` 表示只下视频，不做字幕。
+
+</details>
+
+<details>
+<summary><b>从源码运行（不用 pipx）</b></summary>
+
+```bash
+git clone https://github.com/coo1white/taneko.git
+python -m pip install yt-dlp
+python taneko/taneko.py doctor
+```
+
+下面所有 `taneko` 命令都换成 `python taneko/taneko.py`。从源码运行时，项目放在代码文件夹旁边的 `projects/`。
 
 </details>
 
@@ -187,9 +211,9 @@ YouTube 偶尔会对新地址返回 403，Taneko 会等几秒再试，再不行�
 检查点命令：
 
 ```bash
-python taneko/taneko.py approve game3 terms   # 术语校对完
-python taneko/taneko.py approve game3 spot    # 抽查完
-python taneko/taneko.py translate game3 --test  # 先试翻译风格
+taneko approve game3 terms   # 术语校对完
+taneko approve game3 spot    # 抽查完
+taneko translate game3 --test  # 先试翻译风格
 ```
 
 单个步骤也能单独跑：`fetch / subs / asr / terms / fix / translate / check`。
@@ -197,10 +221,10 @@ python taneko/taneko.py translate game3 --test  # 先试翻译风格
 **API 密钥**只放在环境变量 `OPENCODE_API_KEY`，不写进项目文件：
 
 ```bash
-python taneko/taneko.py key set      # 保存（输入时不显示）
-python taneko/taneko.py key status   # 只显示有没有、多长、从哪来
-python taneko/taneko.py key check    # 问一次服务器密钥是否有效（用 1 个 token）
-python taneko/taneko.py key clear    # 删除
+taneko key set      # 保存（输入时不显示）
+taneko key status   # 只显示有没有、多长、从哪来
+taneko key check    # 问一次服务器密钥是否有效（用 1 个 token）
+taneko key clear    # 删除
 ```
 
 - Windows：`key set` 存进用户环境变量。它是明文，你账户下的程序都读得到。
