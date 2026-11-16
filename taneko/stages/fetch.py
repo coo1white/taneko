@@ -17,7 +17,7 @@ import threading
 import time
 from pathlib import Path
 
-from .. import ranges, stitch
+from .. import hls, ranges, stitch
 from ..core import Stage, die, span, tool_cmd
 from ..project import find_video, load_meta, project_dir
 
@@ -123,7 +123,7 @@ def _fetch_whole(j: _Job) -> None:
 
 
 def _formats(j: _Job) -> list:
-    """yt-dlp 选中的格式（视频+音频时是两个）。不是能按字节读的单个文件就抛 NoIndex。"""
+    """yt-dlp 选中的格式（视频+音频时是两个）。不是单个文件、也不是 HLS 播放列表，就抛 NoIndex。"""
     r = subprocess.run(j.ytdlp + ["-q", "--no-warnings", "-j"] + j.cookies + ["-f", j.fmt, j.url],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0 or not r.stdout.strip():
@@ -131,8 +131,8 @@ def _formats(j: _Job) -> list:
     info = json.loads(r.stdout.strip().splitlines()[-1])
     fs = info.get("requested_formats") or [info]
     for f in fs:
-        if f.get("protocol") != "https" or not f.get("url"):
-            raise ranges.NoIndex("格式 %s 不是能按字节读的单个文件" % f.get("format_id"))
+        if f.get("protocol") not in ("https", "m3u8_native", "m3u8") or not f.get("url"):
+            raise ranges.NoIndex("格式 %s 不是能按字节读的单个文件，也不是 HLS 播放列表" % f.get("format_id"))
     return fs
 
 
@@ -148,9 +148,20 @@ def _fetch_ranges(j: _Job, w0: float, w1: float, tries: int = 3) -> None:
 
 
 def _ranges_once(j: _Job, w0: float, w1: float) -> None:
-    """取一次地址，读索引，下还没下完的格式（已下完的跳过），再切出这一段。"""
-    todo, files = [], []
-    for f in _formats(j):
+    """取一次地址，读索引，下还没下完的格式（已下完的跳过），再切出这一段。
+    HLS 格式按播放列表下（见 hls.py），其余按文件里的索引下（见 ranges.py）。"""
+    todo, files, shift = [], [], 0.0
+    fs = _formats(j)
+    for f in [f for f in fs if f["protocol"] != "https"]:
+        dst = j.parts / ("h_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
+        files.append((dst, f.get("vcodec") not in (None, "none")))
+        j.parts.mkdir(exist_ok=True)
+        print("按播放列表下载格式 %s" % f["format_id"], flush=True)
+        t0 = hls.download(hls.opener(f.get("http_headers")), f["url"], dst, w0, w1, log=lambda m: print(m, flush=True))
+        if files[-1][1] or len(fs) == 1:   # 分片里的时间戳可能不从 0 算：用视频第一片对齐播放列表的时间
+            pk = stitch.video_packets(dst) or stitch.audio_packets(dst)
+            shift = pk[0][0] - t0 if pk else 0.0
+    for f in [f for f in fs if f["protocol"] == "https"]:
         dst = j.parts / ("r_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
         files.append((dst, f.get("vcodec") not in (None, "none")))
         if not dst.exists():
@@ -169,22 +180,23 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
             raise
         except OSError as e:
             die("下载中断：%s。已下的部分在 %s，重跑同一条命令会接着下。" % (e, j.parts))
-    _cut(j, files, w0, w1)
+    _cut(j, files, w0, w1, shift)
 
 
-def _cut(j: _Job, files: list, w0: float, w1: float) -> None:
-    """视频从 w0 之前最近的关键帧开始，音频从 w0 开始，都到 w1；不重新编码。检查通过才替换成品。"""
+def _cut(j: _Job, files: list, w0: float, w1: float, shift: float = 0.0) -> None:
+    """视频从 w0 之前最近的关键帧开始，音频从 w0 开始，都到 w1；不重新编码。检查通过才替换成品。
+    shift：文件里的时间戳比视频时间多出的秒数（HLS 分片常从 1.4 秒之类开始），两条流相同。"""
     vids = [p for p, v in files if v] or [files[0][0]]
     auds = [p for p, v in files if not v and p not in vids]
     pk = stitch.video_packets(vids[0]) or stitch.audio_packets(vids[0])
     if not pk:
         die("%s 读不出内容。删掉 %s 再重跑 fetch。" % (vids[0].name, j.parts))
-    k0, tmp = pk[0][0], j.parts / "_out.mkv"
+    k0, tmp = pk[0][0] - shift, j.parts / "_out.mkv"
     # 下好的文件只有一部分字节，ffmpeg 会说“文件提前结束”，这是正常的，所以只显示致命错误
     ff = [shutil.which("ffmpeg") or "ffmpeg", "-v", "fatal", "-y"]
     cmd = ff + ["-i", str(vids[0])]
     if auds:
-        a0, acut = stitch.audio_packets(auds[0])[0][0], j.parts / "_a.mka"
+        a0, acut = stitch.audio_packets(auds[0])[0][0] - shift, j.parts / "_a.mka"
         # 在输出端截：WebM 的索引指向原文件的字节位置，在输入端跳转会读不到任何音频
         if subprocess.call(ff + ["-i", str(auds[0]), "-ss", "%.3f" % max(0.0, w0 - a0), "-map", "0:a:0",
                                  "-c", "copy", str(acut)]) != 0:
@@ -288,7 +300,7 @@ def _finish(j: _Job, plan: list, seed: Path, use_seed: bool, expected: float) ->
         die("拼接结果没通过检查，已保留在 %s 和各分片，不会覆盖。可以加 --force 重新下载有问题的范围。" % tmp)
     shutil.move(str(tmp), str(j.out))
     if not j.a.keep:
-        for f in [p["file"] for p in plan] + list(j.parts.glob("_*")) + list(j.parts.glob("r_*")) + [seed]:
+        for f in [p["file"] for p in plan] + list(j.parts.glob("_*")) + list(j.parts.glob("r_*")) + list(j.parts.glob("h_*")) + [seed]:
             f.unlink(missing_ok=True)
         try:
             j.parts.rmdir()

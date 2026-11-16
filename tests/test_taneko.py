@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
 from taneko import cli, core, doctor, flow, keys, project, srt  # noqa: E402
-from taneko import ranges, stitch  # noqa: E402
+from taneko import hls, ranges, stitch  # noqa: E402
 from taneko.stages import fetch, translate  # noqa: E402
 
 SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:00:06,500\nBaron down\n"
@@ -562,6 +562,87 @@ class Ranges(unittest.TestCase):
         self.assertFalse(stitch.verify(out, need_audio=True)[0])
 
 
+class Hls(unittest.TestCase):
+    """按播放列表下载（X 等用 HLS 的网站）：只下覆盖这一段的分片，断了跳过已下完的分片。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = TMP / "hls"
+        cls.dir.mkdir()
+        lav = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i"]
+        vid = ["mandelbrot=size=64x64:rate=10", "-t", "30", "-c:v", "libx264", "-g", "10", "-keyint_min", "10",
+               "-sc_threshold", "0"]
+        aud = ["sine=frequency=440:duration=30", "-c:a", "aac"]
+        for kind, seg in (("fmp4", "m4s"), ("mpegts", "ts")):     # X 用 fMP4；TS 的时间戳通常从 1.4 秒开始
+            for name, args in (("v", vid), ("a", aud)):
+                out = cls.dir / ("%s_%s" % (kind, name))
+                extra = ["-hls_fmp4_init_filename", out.name + "_init.mp4"] if kind == "fmp4" else []
+                subprocess.run(lav + args + ["-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod",
+                                             "-hls_segment_type", kind, "-hls_segment_filename",
+                                             str(out) + "_%03d." + seg] + extra + [str(out) + ".m3u8"], check=True)
+
+    @staticmethod
+    def fetcher(fail_after=None):
+        import urllib.parse, urllib.request
+        calls = [0]
+
+        def fetch(u):
+            calls[0] += 1
+            if fail_after is not None and calls[0] > fail_after:
+                raise OSError("network down")
+            return Path(urllib.request.url2pathname(urllib.parse.urlparse(u).path)).read_bytes()
+        return fetch, calls
+
+    def url(self, name):
+        return (self.dir / name).as_uri()
+
+    def test_playlist_is_the_index(self):
+        text = (self.dir / "fmp4_v.m3u8").read_text()
+        init, segs = hls.playlist(text, self.url("fmp4_v.m3u8"))
+        self.assertTrue(init.endswith("fmp4_v_init.mp4"))
+        self.assertAlmostEqual(sum(d for _, d, _ in segs), 30, delta=0.2)
+        idx = hls.pick(segs, 13, 21)
+        self.assertLessEqual(segs[idx[0]][0], 13)
+        self.assertGreaterEqual(segs[idx[-1]][0] + segs[idx[-1]][1], 21)
+        for bad in (text.replace("#EXT-X-ENDLIST", ""), text.replace("#EXTINF", '#EXT-X-KEY:METHOD=AES-128,URI="k"\n#EXTINF', 1),
+                    "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n"):
+            with self.assertRaises(ranges.NoIndex):
+                hls.playlist(bad, self.url("x.m3u8"))
+
+    def test_resume_skips_finished_segments(self):
+        dst = self.dir / "h_v.mp4"
+        fetch, calls = self.fetcher(fail_after=4)                 # 播放列表 + init + 2 片，然后断网
+        with self.assertRaises(OSError):
+            hls.download(fetch, self.url("fmp4_v.m3u8"), dst, 13, 21, log=lambda *_: None, retries=1)
+        fetch, calls = self.fetcher()
+        t0 = hls.download(fetch, self.url("fmp4_v.m3u8"), dst, 13, 21, log=lambda *_: None)
+        self.assertEqual(t0, 12)
+        self.assertEqual(calls[0], 1 + 5 - 2)                    # 播放列表 + 剩下的 3 片（共 5 片，已有 init 和 2 片）
+        pk = stitch.video_packets(dst)
+        self.assertAlmostEqual(pk[0][0], 12, delta=0.25)                  # B 帧让第一帧晚 2 帧（0.2 秒）
+        self.assertGreaterEqual(pk[-1][0], 21)
+        self.assertEqual(hls.download(fetch, self.url("fmp4_v.m3u8"), dst, 13, 21), 12)   # 已下完：不再下载
+
+    def test_cut_lines_up_ts_timestamps(self):
+        parts = self.dir / "cut"
+        parts.mkdir()
+        files, shift = [], 0.0
+        for name, is_video in (("mpegts_v", True), ("mpegts_a", False)):
+            dst = parts / ("h_%s.ts" % name)
+            t0 = hls.download(self.fetcher()[0], self.url(name + ".m3u8"), dst, 13, 21, log=lambda *_: None)
+            files.append((dst, is_video))
+            if is_video:
+                shift = stitch.video_packets(dst)[0][0] - t0
+        self.assertGreater(shift, 1)                                # TS 的时间戳不从 0 开始
+        j = SimpleNamespace(parts=parts, out=self.dir / "cut.mkv", a=SimpleNamespace(keep=True))
+        with redirect_stdout(io.StringIO()):
+            fetch._cut(j, files, 13, 21, shift)
+        ok, msg = stitch.verify(j.out, expected_s=8, need_audio=True)
+        self.assertTrue(ok, msg)
+        ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
+        self.assertAlmostEqual(ap[0][0] - vp[0][0], 13 - 12, delta=0.1)   # 视频从 12 秒的分片开始，声音从 13 秒开始
+
+
 class Seams(unittest.TestCase):
     """像 yt-dlp 截片段那样造分片：视频从起点前的关键帧开始，音频从起点开始。拼起来后音频不能有空白。"""
 
@@ -640,8 +721,8 @@ class Seams(unittest.TestCase):
 
 class Layers(unittest.TestCase):
     """依赖只往下走：cli → flow → stages → project / srt / keys / stitch → core。阶段之间互不引用。"""
-    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
-               "stages": {"core", "project", "srt", "keys", "stitch", "ranges"}, "flow": {"core", "project", "stages"},
+    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "hls": {"ranges"}, "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
+               "stages": {"core", "project", "srt", "keys", "stitch", "ranges", "hls"}, "flow": {"core", "project", "stages"},
                "cli": {"core", "doctor", "flow", "keys", "project"}}
 
     def test_imports_only_go_down(self):
