@@ -6,7 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
 from taneko import cli, core, flow, keys, project, srt  # noqa: E402
-from taneko.stages import translate  # noqa: E402
+from taneko import stitch  # noqa: E402
+from taneko.stages import fetch, translate  # noqa: E402
 
 SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:00:06,500\nBaron down\n"
 
@@ -293,6 +294,78 @@ class Flow(unittest.TestCase):
         bad[0]["start"] += 1
         srt.write_srt([dict(c, text="中") for c in bad], d / "zh.srt")
         self.assertFalse(flow.STAGES["check"].done(d, project.load_meta(d)))
+
+
+class Seams(unittest.TestCase):
+    """像 yt-dlp 截片段那样造分片：视频从起点前的关键帧开始，音频从起点开始。拼起来后音频不能有空白。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = TMP / "seams"
+        cls.dir.mkdir()
+        cls.v, cls.a = cls.dir / "src_v.mkv", cls.dir / "src_a.m4a"
+        ff = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i"]
+        subprocess.run(ff + ["mandelbrot=size=64x64:rate=10", "-t", "45", "-c:v", "libx264", "-g", "25",
+                             "-keyint_min", "25", "-sc_threshold", "0", str(cls.v)], check=True)
+        subprocess.run(ff + ["sine=frequency=440:duration=45", "-c:a", "aac", str(cls.a)], check=True)
+
+    def piece(self, name, a, b, audio_end=None):
+        """yt-dlp --download-sections + ffmpeg_i:-copyts 的样子：两路输入各自 seek，时间戳保持绝对值。"""
+        out = self.dir / name
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-copyts", "-ss", str(a), "-t", str(b - a), "-i", str(self.v),
+                        "-copyts", "-ss", str(a), "-t", str((audio_end or b) - a), "-i", str(self.a),
+                        "-map", "0:v", "-map", "1:a", "-c", "copy", str(out)], check=True)
+        return out
+
+    def test_pieces_start_like_ytdlp(self):
+        p = self.piece("p1.mkv", 11, 20)
+        self.assertLess(stitch.video_packets(p)[0][0], 11 - 0.5)      # 视频从 10 秒的关键帧开始
+        self.assertAlmostEqual(stitch.audio_packets(p)[0][0], 11, delta=0.1)  # 音频从 11 秒开始
+        self.assertTrue(fetch._verify_piece(p, 11, 20, False)[0])
+
+    def test_short_audio_is_rejected(self):
+        p = self.piece("short.mkv", 0, 10, audio_end=5)
+        ok, msg = fetch._verify_piece(p, 0, 10, False)
+        self.assertFalse(ok)
+        self.assertIn("音频", msg)
+
+    def test_assembled_audio_has_no_gaps(self):
+        parts = [self.piece("q%d.mkv" % i, a, a + 9 if a < 18 else 30) for i, a in enumerate((0, 9, 18))]
+        out = self.dir / "out.mkv"
+        stitch.assemble(out, parts, workdir=self.dir, log=lambda *_: None)
+        ok, msg = stitch.verify(out, expected_s=30)
+        self.assertTrue(ok, msg)
+        ap, vp = stitch.audio_packets(out), stitch.video_packets(out)
+        gaps = [b[0] - a[0] - a[1] for a, b in zip(ap, ap[1:])]
+        self.assertLess(max(gaps), 0.05, msg)
+        self.assertAlmostEqual(ap[0][0] - vp[0][0], 0, delta=0.05)               # 开头音画对齐
+        self.assertAlmostEqual(ap[-1][0] + ap[-1][1] - ap[0][0], 30, delta=0.2)  # 声音一秒不少
+
+    def test_seed_then_pieces_have_no_gaps(self):
+        seed = self.dir / "seed.mkv"  # 旧的半截文件：没有 -copyts，时间从 0 开始（原视频 5～35 秒）
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "5", "-t", "30", "-i", str(self.v), "-ss", "5", "-t", "30",
+                        "-i", str(self.a), "-map", "0:v", "-map", "1:a", "-c", "copy", str(seed)], check=True)
+        parts = [self.piece("s0.mkv", 10, 40), self.piece("s1.mkv", 40, 45)]  # 第一片从种子结尾前 25 秒开始，同 fetch
+        out = self.dir / "seeded.mkv"
+        stitch.assemble(out, parts, seed=seed, workdir=self.dir, log=lambda *_: None)
+        ok, msg = stitch.verify(out, expected_s=40)
+        self.assertTrue(ok, msg)
+        ap = stitch.audio_packets(out)
+        self.assertAlmostEqual(ap[-1][0] + ap[-1][1] - ap[0][0], 40, delta=0.2, msg=msg)
+
+    def test_verify_reports_a_silent_gap(self):
+        out = self.dir / "gap.mkv"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(self.v), "-i", str(self.a), "-map", "0:v", "-map", "1:a",
+                        "-af", "aselect='not(between(t,12,14))',asetpts=PTS", "-c:v", "copy", "-c:a", "aac", str(out)], check=True)
+        ok, msg = stitch.verify(out)
+        self.assertFalse(ok)
+        self.assertIn("没声音", msg)
+
+    def test_one_rule_for_complete(self):
+        self.assertTrue(stitch.duration_ok(594, 600))       # 短 6 秒：容差至少 6 秒
+        self.assertFalse(stitch.duration_ok(590, 600))
+        self.assertTrue(stitch.duration_ok(3280, 3300))     # 长片段按 1%，最多 25 秒
+        self.assertFalse(stitch.duration_ok(3270, 3300))
 
 
 class Layers(unittest.TestCase):

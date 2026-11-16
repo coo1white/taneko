@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""fetch：可续传的分片下载（像种子一样按“片”管理）。
+"""fetch：可续传的下载。
 
-适用于任何项目：整条视频，或 meta.json 里 section.download 指定的一段（如 "4:13:00-5:08:00"）。
-- 把要下的范围切成 chunk 秒的小片（默认 600 秒），每片单独下载，带 -copyts 保留绝对时间戳。
-- 每片下完立刻校验（起止时间、关键帧）。断了、被限速了、链接过期了，只影响当前这一片。
-- 重跑同一条命令：已完成的片自动跳过，只补缺的。
-- 全部下完后按关键帧无损拼接成 <name>.mkv，并检查时间戳是否连续。
-- 旧的“半截文件”（<name>.mkv 比应有的短）会被当作种子接着用，不用从头来。
+- 整条视频（meta.json 没有 section.download）：交给 yt-dlp 直接下整个文件，它自己会续传，不切片、不拼接。
+- 一段（section.download，如 "4:13:00-5:08:00"）：yt-dlp 截取片段靠 ffmpeg，断了不能续传，所以像种子一样按“片”管理：
+  把范围切成 chunk 秒的小片（默认 600 秒），每片带 -copyts 保留绝对时间戳单独下载，下完立刻校验视频和音频；
+  重跑只补缺的片；全部下完后按关键帧无损拼接成 <name>.mkv，并检查视频和音频有没有断档。
+  旧的“半截文件”（<name>.mkv 比应有的短）会被当作种子接着用，不用从头来。
+“下载完整”只有一个标准：stitch.duration_ok。
 """
 import shutil
 import subprocess
@@ -54,17 +54,15 @@ def expected_duration(meta: dict):
 
 def done(d: Path, meta: dict) -> bool:
     v = find_video(d, meta)
-    if not v or (d / "_parts").exists():
-        return False
     exp = expected_duration(meta)
+    if not v or (exp is not None and (d / "_parts").exists()):
+        return False
     dur = video_duration(v)
-    if exp is None or dur is None:
-        return True
-    return dur >= exp - min(25.0, max(1.0, exp * 0.01))  # 容差：长视频 25 秒，短的按 1%
+    return exp is None or dur is None or stitch.duration_ok(dur, exp)
 
 
 def _verify_piece(path: Path, a: float, b: float, last: bool):
-    """返回 (ok, 说明)。"""
+    """返回 (ok, 说明)。视频要从 a 之前的关键帧开始、到 b 结束；有音频的话，音频也要盖住 a 到 b。"""
     if not path.exists():
         return False, "文件不存在"
     pk = stitch.video_packets(path)
@@ -77,157 +75,172 @@ def _verify_piece(path: Path, a: float, b: float, last: bool):
         return False, "起点 %.1f 秒与预期 %.1f 秒不符（-copyts 没生效，或这一片是别的范围）" % (first, a)
     tol = 6 if last else 3
     if end < b - tol:
-        return False, "没下完整：结尾 %.1f 秒，应到 %.1f 秒" % (end, b)
-    return True, "%.1f 秒 → %.1f 秒" % (first, end)
+        return False, "视频没下完整：结尾 %.1f 秒，应到 %.1f 秒" % (end, b)
+    ap = stitch.audio_packets(path)
+    if ap:
+        if ap[0][0] > a + 1.0:
+            return False, "音频起点 %.1f 秒，晚于 %.1f 秒" % (ap[0][0], a)
+        if ap[-1][0] + ap[-1][1] < b - tol:
+            return False, "音频没下完整：结尾 %.1f 秒，应到 %.1f 秒" % (ap[-1][0] + ap[-1][1], b)
+    return True, "%.1f 秒 → %.1f 秒%s" % (first, end, "" if ap else "（没有音频）")
 
 
-def cmd_fetch(a) -> None:
-    d = project_dir(a.project)
-    meta = load_meta(d)
-    url = meta.get("source_url") or die("meta.json 里没有 source_url")
-    sec = meta.get("section", {}) or {}
-    fcfg = meta.get("fetch", {}) or {}
-    fmt = a.format or fcfg.get("format") or "bv*+ba/b"
-    browser = a.browser or fcfg.get("browser") or "firefox"
-    name = sec.get("name") or fcfg.get("name") or "video"
-    out = d / (name + ".mkv")
-    parts = d / "_parts"
-    parts.mkdir(exist_ok=True)
-    ytdlp = tool_cmd("yt-dlp", "yt_dlp")
-    cookies = [] if browser == "none" else ["--cookies-from-browser", browser]
+class _Job:
+    """一次 fetch 要用的东西：项目、格式、cookies、yt-dlp 命令。"""
 
-    # 1. 下载范围
-    if sec.get("download"):
-        w0, w1 = [_t2s(x) for x in sec["download"].split("-")]
-    else:
-        r = subprocess.run(ytdlp + cookies + ["--skip-download", "--print", "%(duration)s", "--no-warnings", url],
-                           capture_output=True, text=True)
-        try:
-            w0, w1 = 0.0, float(r.stdout.strip().splitlines()[-1])
-        except Exception:  # noqa: BLE001
-            die("取不到视频时长。把下面的报错发给我：\n" + (r.stderr or r.stdout)[-400:])
+    def __init__(self, a):
+        self.a = a
+        self.d = project_dir(a.project)
+        meta = load_meta(self.d)
+        self.url = meta.get("source_url") or die("meta.json 里没有 source_url")
+        self.sec = meta.get("section", {}) or {}
+        fcfg = meta.get("fetch", {}) or {}
+        self.fmt = a.format or fcfg.get("format") or "bv*+ba/b"
+        browser = a.browser or fcfg.get("browser") or "firefox"
+        self.name = self.sec.get("name") or fcfg.get("name") or "video"
+        self.out = self.d / (self.name + ".mkv")
+        self.parts = self.d / "_parts"
+        self.ytdlp = tool_cmd("yt-dlp", "yt_dlp")
+        self.cookies = [] if browser == "none" else ["--cookies-from-browser", browser]
+
+    def piece(self, path: Path, ta: float, tb: float) -> int:
+        cmd = self.ytdlp + ["-q", "--no-warnings"] + self.cookies + [
+            "-f", self.fmt, "--download-sections", "*%s-%s" % (_s2t(ta), _s2t(tb)),
+            "--downloader-args", "ffmpeg_i:-copyts", "--merge-output-format", "mkv",
+            "-P", str(self.parts), "-o", path.stem + ".%(ext)s", self.url]
+        return subprocess.call(cmd)
+
+
+def _fetch_whole(j: _Job) -> None:
+    """整条视频：yt-dlp 直接下，断了重跑会从 .part 接着下；下完检查视频和音频。"""
+    print("下载整条视频，格式 %s（断了重跑同一条命令，会接着下）" % j.fmt)
+    rc = subprocess.call(j.ytdlp + ["--no-warnings"] + j.cookies + [
+        "-f", j.fmt, "--merge-output-format", "mkv", "--remux-video", "mkv",
+        "-P", str(j.d), "-o", j.name + ".%(ext)s", j.url])
+    if rc != 0 or not j.out.exists():
+        die("下载没有完成（退出码 %s）。重跑同一条命令会接着下。" % rc)
+    ok, msg = stitch.verify(j.out)
+    print("检查结果：" + msg)
+    if not ok:
+        die("%s 没通过检查：%s。删掉它再重跑 fetch。" % (j.out.name, msg))
+    print("完成：%s" % j.out)
+
+
+def _plan(j: _Job, w0: float, w1: float, seed: Path):
+    """已有的成品或半截文件，以及分片计划。返回 (plan, use_seed)；成品已完整时返回 (None, False)。"""
     expected = w1 - w0
-    print("下载范围 %s → %s（约 %.1f 分钟），格式 %s，每片 %d 秒" % (_s2t(w0), _s2t(w1), expected / 60, fmt, a.chunk))
-
-    # 2. 已有的成品 / 半截文件
-    seed = parts / "seed.mkv"
-    if out.exists() and not seed.exists():
-        pk = stitch.video_packets(out)
-        dur = (pk[-1][0] - pk[0][0]) if pk else 0
-        if dur >= expected - 25 and not a.force:
-            ok, msg = stitch.verify(out, expected_s=expected)
-            print("%s 已经存在且完整：%s" % (out.name, msg))
-            return
-        shutil.move(str(out), str(seed))
-        print("发现半截文件 %s（%.1f 分钟），作为种子接着用" % (out.name, dur / 60))
+    if j.out.exists() and not seed.exists():
+        dur = video_duration(j.out) or 0.0
+        if stitch.duration_ok(dur, expected) and not j.a.force:
+            ok, msg = stitch.verify(j.out, expected_s=expected)
+            print("%s 已经存在且完整：%s" % (j.out.name, msg))
+            return None, False
+        shutil.move(str(j.out), str(seed))
+        print("发现半截文件 %s（%.1f 分钟），作为种子接着用" % (j.out.name, dur / 60))
     seed_dur = 0.0
-    if seed.exists() and not a.no_seed:
+    if seed.exists() and not j.a.no_seed:
         pk = stitch.video_packets(seed)
         seed_dur = (pk[-1][0] - pk[0][0]) if pk else 0
     use_seed = seed_dur > 30
     if seed.exists() and not use_seed:
         seed.unlink()
-
-    # 3. 分片计划（种子后面留 25 秒重叠，用来对齐）
-    start = max(w0, w0 + seed_dur - 25) if use_seed else w0
-    start = int(start)
+    start = int(max(w0, w0 + seed_dur - 25) if use_seed else w0)  # 种子后面留 25 秒重叠，用来对齐
     plan, b = [], start
     while b < w1 - 3:
-        e = min(b + a.chunk, w1)
-        plan.append({"i": len(plan), "a": b, "b": e})
+        e = min(b + j.a.chunk, w1)
+        plan.append({"i": len(plan), "a": b, "b": e, "file": j.parts / ("p%d.mkv" % len(plan)), "last": e >= w1 - 0.5})
         b = e
     if not plan:
         die("没有需要下载的范围")
-    for p in plan:
-        p["file"] = parts / ("p%d.mkv" % p["i"])
-        p["last"] = p["b"] >= w1 - 0.5
+    return plan, use_seed
 
-    # 4. 先用 20 秒小片试探：确认 -copyts 真的保留了绝对时间戳
-    def fetch_piece(path: Path, ta: float, tb: float) -> int:
-        stem = path.stem
-        cmd = ytdlp + ["-q", "--no-warnings"] + cookies + [
-            "-f", fmt, "--download-sections", "*%s-%s" % (_s2t(ta), _s2t(tb)),
-            "--downloader-args", "ffmpeg_i:-copyts", "--merge-output-format", "mkv",
-            "-P", str(parts), "-o", stem + ".%(ext)s", url]
-        return subprocess.call(cmd)
 
-    pending = []
-    for p in plan:
-        ok, _ = _verify_piece(p["file"], p["a"], p["b"], p["last"]) if p["file"].exists() else (False, "")
-        if not ok:
-            if p["file"].exists():
-                p["file"].unlink()
-            pending.append(p)
-    done_n = len(plan) - len(pending)
-    print("共 %d 片，已完成 %d 片，还要下 %d 片" % (len(plan), done_n, len(pending)))
+def _probe(j: _Job, a0: float) -> None:
+    """先用 20 秒小片试探：确认 -copyts 真的保留了绝对时间戳。"""
+    probe = j.parts / "probe.mkv"
+    probe.unlink(missing_ok=True)
+    print("先试探 20 秒，确认时间戳正常……")
+    rc = j.piece(probe, a0, a0 + 20)
+    pk = stitch.video_packets(probe) if probe.exists() else []
+    if rc != 0 or not pk:
+        die("试探失败（退出码 %s）。看上面 yt-dlp 的报错：常见原因是网络、cookies 过期或格式不存在（用 yt-dlp -F 看有哪些格式）。" % rc)
+    if pk[0][0] < a0 - 15:
+        die("-copyts 没有生效：试探片的起点是 %.1f 秒，应约为 %.0f 秒。请升级 yt-dlp 和 ffmpeg 后重试。" % (pk[0][0], a0))
+    probe.unlink()
+    print("  时间戳正常（起点 %.1f 秒）" % pk[0][0])
 
-    if pending and done_n == 0:
-        probe = parts / "probe.mkv"
-        if probe.exists():
-            probe.unlink()
-        print("先试探 20 秒，确认时间戳正常……")
-        rc = fetch_piece(probe, plan[0]["a"], plan[0]["a"] + 20)
-        pk = stitch.video_packets(probe) if probe.exists() else []
-        if rc != 0 or not pk:
-            die("试探失败（退出码 %s）。把上面的报错发给我。" % rc)
-        if pk[0][0] < plan[0]["a"] - 15:
-            die("-copyts 没有生效：试探片的起点是 %.1f 秒，应约为 %.0f 秒。把这句话发给我，我换个办法。" % (pk[0][0], plan[0]["a"]))
-        probe.unlink()
-        print("  时间戳正常（起点 %.1f 秒）" % pk[0][0])
 
-    # 5. 下载缺的片（失败自动重试，下一次重跑会接着补）
-    lock = threading.Lock()
-    failed = []
+def _download(j: _Job, plan: list, pending: list) -> None:
+    """下载缺的片；每片失败自动重试，还失败就停下，已完成的不会丢。"""
+    lock, failed = threading.Lock(), []
 
     def work(p):
-        for attempt in range(1, a.retries + 1):
+        for attempt in range(1, j.a.retries + 1):
             t0 = time.time()
             with lock:
                 print("[%d/%d] 第 %d 片 %s → %s（第 %d 次尝试）" % (p["i"] + 1, len(plan), p["i"], _s2t(p["a"]), _s2t(p["b"]), attempt))
-            rc = fetch_piece(p["file"], p["a"], p["b"])
+            rc = j.piece(p["file"], p["a"], p["b"])
             ok, msg = _verify_piece(p["file"], p["a"], p["b"], p["last"]) if rc == 0 else (False, "退出码 %s" % rc)
-            if ok:
-                with lock:
-                    print("   第 %d 片完成，用时 %.0f 秒（%s）" % (p["i"], time.time() - t0, msg))
-                return
             with lock:
-                print("   第 %d 片失败：%s" % (p["i"], msg))
-            if p["file"].exists():
-                p["file"].unlink()
+                print("   第 %d 片%s（%s）" % (p["i"], "完成，用时 %.0f 秒" % (time.time() - t0) if ok else "失败", msg))
+            if ok:
+                return
+            p["file"].unlink(missing_ok=True)
             time.sleep(5 * attempt)
         failed.append(p["i"])
 
-    if pending:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
-            list(ex.map(work, pending))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, j.a.jobs)) as ex:
+        list(ex.map(work, pending))
     if failed:
         die("还有 %d 片没下成功（第 %s 片）。已完成的不会丢，重跑同一条命令会接着补。" % (len(failed), "、".join(map(str, sorted(failed)))))
 
-    # 6. 拼接并检查
+
+def _finish(j: _Job, plan: list, seed: Path, use_seed: bool, expected: float) -> None:
+    """拼接、检查，通过了才替换成品并清理分片。"""
     print("全部下完，开始拼接……")
-    tmp = parts / "_out.mkv"
+    tmp = j.parts / "_out.mkv"
     try:
-        stitch.assemble(tmp, [p["file"] for p in plan], seed=seed if use_seed else None, workdir=parts)
+        stitch.assemble(tmp, [p["file"] for p in plan], seed=seed if use_seed else None, workdir=j.parts)
     except RuntimeError as e:
-        die("拼接失败：%s\n分片都还在 %s，不会丢。把这段发给我。" % (e, parts))
+        die("拼接失败：%s\n分片都还在 %s，不会丢。" % (e, j.parts))
     ok, msg = stitch.verify(tmp, expected_s=expected)
     print("拼接结果：" + msg)
     if not ok:
-        die("拼接结果没通过检查，已保留在 %s 和各分片，不会覆盖。把上面这行发给我。" % tmp)
-    shutil.move(str(tmp), str(out))
-    if not a.keep:
-        for p in plan:
-            p["file"].unlink(missing_ok=True)
-        for f in list(parts.glob("_*.mkv")) + list(parts.glob("_*.txt")):
+        die("拼接结果没通过检查，已保留在 %s 和各分片，不会覆盖。可以加 --force 重新下载有问题的范围。" % tmp)
+    shutil.move(str(tmp), str(j.out))
+    if not j.a.keep:
+        for f in [p["file"] for p in plan] + list(j.parts.glob("_*")) + [seed]:
             f.unlink(missing_ok=True)
-        if seed.exists():
-            seed.unlink()
         try:
-            parts.rmdir()
+            j.parts.rmdir()
         except OSError:
             pass
-    print("完成：%s" % out)
+    print("完成：%s" % j.out)
+
+
+def cmd_fetch(a) -> None:
+    j = _Job(a)
+    if not j.sec.get("download"):
+        return _fetch_whole(j)
+    w0, w1 = [_t2s(x) for x in j.sec["download"].split("-")]
+    print("下载范围 %s → %s（约 %.1f 分钟），格式 %s，每片 %d 秒" % (_s2t(w0), _s2t(w1), (w1 - w0) / 60, j.fmt, a.chunk))
+    j.parts.mkdir(exist_ok=True)
+    seed = j.parts / "seed.mkv"
+    plan, use_seed = _plan(j, w0, w1, seed)
+    if plan is None:
+        return
+    pending = []
+    for p in plan:
+        if not (p["file"].exists() and _verify_piece(p["file"], p["a"], p["b"], p["last"])[0]):
+            p["file"].unlink(missing_ok=True)
+            pending.append(p)
+    print("共 %d 片，已完成 %d 片，还要下 %d 片" % (len(plan), len(plan) - len(pending), len(pending)))
+    if pending and len(pending) == len(plan):
+        _probe(j, plan[0]["a"])
+    if pending:
+        _download(j, plan, pending)
+    _finish(j, plan, seed, use_seed, w1 - w0)
 
 
 def args(p) -> None:
@@ -237,4 +250,4 @@ def args(p) -> None:
     p.add_argument("--no-seed", action="store_true"); p.add_argument("--keep", action="store_true")
 
 
-STAGE = Stage("fetch", "下载视频（可续传分片）", done, cmd_fetch, args)
+STAGE = Stage("fetch", "下载视频（可续传）", done, cmd_fetch, args)

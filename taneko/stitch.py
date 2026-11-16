@@ -109,12 +109,79 @@ def align(seed, chunk0, tail_s=12.0, head_s=45.0):
     return d, cf, spk, cpk
 
 
-def _cut(src, dst, duration, workdir):
-    """无损截取前 duration 秒（视频包的结束点正好落在下一段的关键帧上）。"""
-    r = subprocess.run([_ff("ffmpeg"), "-v", "error", "-y", "-i", str(src), "-t", "%.6f" % duration, "-map", "0",
+def audio_packets(path):
+    """返回按时间排序的 [(pts秒, 时长秒)]（只看第一条音频流）；没有音频就是 []。"""
+    r = subprocess.run([_ff("ffprobe"), "-v", "error", "-select_streams", "a:0", "-show_entries",
+                        "packet=pts_time,duration_time", "-of", "csv=p=0", str(path)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    pk = []
+    for line in r.stdout.splitlines():
+        a = line.strip().split(",")
+        try:
+            pk.append((float(a[0]), float(a[1]) if len(a) > 1 and a[1] not in ("", "N/A") else 0.0))
+        except ValueError:
+            pass
+    pk.sort()
+    return pk
+
+
+def tolerance(expected: float) -> float:
+    """“下载完整”的唯一标准：最多比预期短 1%，至少 6 秒（关键帧间隔），最多 25 秒。"""
+    return min(25.0, max(6.0, expected * 0.01))
+
+
+def duration_ok(actual: float, expected: float) -> bool:
+    return actual >= expected - tolerance(expected)
+
+
+def _split(src, dst, kind, workdir):
+    """把一条流（v 或 a）原样抽成单独的文件，时间戳不变。"""
+    r = subprocess.run([_ff("ffmpeg"), "-v", "error", "-y", "-copyts", "-i", str(src), "-map", "0:%s:0" % kind,
                         "-c", "copy", str(dst)], capture_output=True, text=True, cwd=str(workdir))
     if r.returncode != 0:
-        raise RuntimeError("截取失败：" + r.stderr[-300:])
+        raise RuntimeError("抽取%s失败：%s" % ("视频" if kind == "v" else "音频", r.stderr[-300:]))
+
+
+def _seams(chunks, seed, log):
+    """算出每段的起点（inpoint）、视频和音频各自的接缝（outpoint）、在成品里占多长（duration）。
+
+    视频在下一段的第一个关键帧处接上；音频在下一段音频的起点处接上（音频从请求的起点开始，
+    比关键帧晚），所以上一段的音频要多留一点，接缝处才不会没声音。两者用同一个起点，音画同步。"""
+    vpk = [video_packets(c) for c in chunks]
+    apk = [audio_packets(c) for c in chunks]
+    if not all(vpk):
+        raise RuntimeError("有分片里没有视频包")
+    audio = all(apk)
+    if any(apk) and not audio:
+        raise RuntimeError("有的分片有音频，有的没有，请重跑 fetch")
+    fp = frame_period(vpk[0])
+    vfirst = [pk[0][0] for pk in vpk]
+    afirst = [pk[0][0] for pk in apk] if audio else vfirst
+    start = [min(v, a) for v, a in zip(vfirst, afirst)]
+    aend = lambda pk: pk[-1][0] + pk[-1][1]  # noqa: E731
+    items = []
+    if seed:
+        d, cost, spk, _ = align(seed, chunks[0])
+        sapk = audio_packets(seed) if audio else []
+        s0 = min(spk[0][0], sapk[0][0]) if sapk else spk[0][0]
+        if vfirst[0] - d - s0 < 1 or vfirst[0] - d > spk[-1][0] - 0.2:
+            raise RuntimeError("种子和新段没有足够的重叠，无法拼接")
+        if audio and (not sapk or aend(sapk) < afirst[0] - d - 0.05):
+            raise RuntimeError("种子的音频没有接到新段的音频起点")
+        log("  种子对齐：偏移 %.3f 秒，画面差异 %.2f，接缝在新段 %.3f 秒处" % (d, cost, vfirst[0]))
+        items.append({"src": seed, "in": s0, "v": vfirst[0] - d, "a": afirst[0] - d, "dur": start[0] - d - s0})
+    for i, c in enumerate(chunks):
+        it = {"src": c, "in": start[i]}
+        if i + 1 < len(chunks):
+            if vfirst[i + 1] <= vfirst[i]:
+                raise RuntimeError("第 %d 段与第 %d 段时间重叠异常" % (i, i + 1))
+            if vpk[i][-1][0] + fp < vfirst[i + 1] - 0.05:
+                raise RuntimeError("第 %d 段视频没有下完整（结尾 %.2f，下一段起点 %.2f），请重跑 fetch" % (i, vpk[i][-1][0], vfirst[i + 1]))
+            if audio and aend(apk[i]) < afirst[i + 1] - 0.05:
+                raise RuntimeError("第 %d 段音频没有接到下一段（结尾 %.2f，下一段音频起点 %.2f），请重跑 fetch" % (i, aend(apk[i]), afirst[i + 1]))
+            it.update(v=vfirst[i + 1], a=afirst[i + 1], dur=start[i + 1] - start[i])
+        items.append(it)
+    return items, audio
 
 
 def assemble(out, chunks, seed=None, workdir=None, log=print):
@@ -122,62 +189,53 @@ def assemble(out, chunks, seed=None, workdir=None, log=print):
     out = Path(out)
     workdir = Path(workdir or out.parent)
     workdir.mkdir(parents=True, exist_ok=True)
-    pieces = []  # (文件, 视频时长)
-    cpks = [video_packets(c) for c in chunks]
-    for c, pk in zip(chunks, cpks):
-        if not pk:
-            raise RuntimeError("%s 里没有视频包" % c)
-    fps_period = frame_period(cpks[0])
-    firsts = [pk[0][0] for pk in cpks]
-    if seed:
-        d, cost, spk, _ = align(seed, chunks[0])
-        J = firsts[0]
-        t_end = J - d - spk[0][0]
-        if t_end < 1 or J - d > spk[-1][0] - 0.2:
-            raise RuntimeError("种子和新段没有足够的重叠，无法拼接")
-        log("  种子对齐：偏移 %.3f 秒，画面差异 %.2f，接缝在新段 %.3f 秒处" % (d, cost, J))
-        trimmed = workdir / "_seed_trim.mkv"
-        _cut(seed, trimmed, t_end, workdir)
-        pieces.append((trimmed, t_end))
-    for i, c in enumerate(chunks):
-        if i + 1 < len(chunks):
-            J = firsts[i + 1]
-            dur = J - firsts[i]
-            if dur <= 0:
-                raise RuntimeError("第 %d 段与第 %d 段时间重叠异常" % (i, i + 1))
-            if cpks[i][-1][0] + fps_period < J - 0.05:
-                raise RuntimeError("第 %d 段没有下完整（结尾 %.2f，下一段起点 %.2f），请重跑 fetch" % (i, cpks[i][-1][0], J))
-            trimmed = workdir / ("_trim%d.mkv" % i)
-            _cut(c, trimmed, dur, workdir)
-            pieces.append((trimmed, dur))
-        else:
-            dur = cpks[i][-1][0] + fps_period - firsts[i]
-            pieces.append((c, dur))
-    lst = workdir / "_concat.txt"
-    with open(lst, "w", encoding="utf-8") as f:
-        for p, dur in pieces:
-            f.write("file '%s'\nduration %.6f\n" % (str(Path(p).resolve()).replace("\\", "/").replace("'", r"'\''"), dur))
-    r = subprocess.run([_ff("ffmpeg"), "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-map", "0",
-                        "-c", "copy", str(out)], capture_output=True, text=True, cwd=str(workdir))
+    items, audio = _seams(chunks, seed, log)
+    lists = []
+    for kind in ("v", "a") if audio else ("v",):
+        lst = workdir / ("_concat_%s.txt" % kind)
+        with open(lst, "w", encoding="utf-8") as f:
+            for n, it in enumerate(items):
+                part = workdir / ("_%s%d.%s" % (kind, n, "mkv" if kind == "v" else "mka"))
+                _split(it["src"], part, kind, workdir)
+                f.write("file '%s'\ninpoint %.6f\n" % (str(part.resolve()).replace("\\", "/").replace("'", r"'\''"), it["in"]))
+                if kind in it:
+                    f.write("outpoint %.6f\nduration %.6f\n" % (it[kind], it["dur"]))
+        lists += ["-f", "concat", "-safe", "0", "-i", str(lst)]
+    maps = ["-map", "0:v"] + (["-map", "1:a"] if audio else [])
+    r = subprocess.run([_ff("ffmpeg"), "-v", "error", "-y"] + lists + maps + ["-c", "copy", "-copyts", str(out)],
+                       capture_output=True, text=True, cwd=str(workdir))
     if r.returncode != 0:
         raise RuntimeError("拼接失败：" + r.stderr[-300:])
     return out
 
 
 def verify(path, expected_s=None, max_gap=0.1):
-    """检查拼接结果：时长、视频时间戳是否连续（有没有跳帧或断档）。返回 (ok, 说明)。"""
+    """检查成品：时长；视频和音频的时间戳是否连续（有没有跳帧、断档、没声音的空白）。返回 (ok, 说明)。"""
     pk = video_packets(path)
     if not pk:
         return False, "没有视频包"
     ts = [p for p, _ in pk]
-    gaps = [(b - a, a) for a, b in zip(ts, ts[1:]) if b - a > max_gap]
+    vgap = max(max_gap, 1.5 * frame_period(pk))  # 低帧率时，一帧的间隔本身就可能超过 0.1 秒
+    gaps = [(b - a, a) for a, b in zip(ts, ts[1:]) if b - a > vgap and a < ts[-1] - 1.0]  # 最后 1 秒是截取的边界，不算接缝
     dur = ts[-1] - ts[0]
     msg = "视频时长 %.1f 秒" % dur
     ok = True
     if gaps:
         ok = False
-        msg += "；发现 %d 处时间断档，最大 %.2f 秒（在 %.1f 秒处）" % (len(gaps), max(gaps)[0], max(gaps)[1])
-    if expected_s and abs(dur - expected_s) > 20:
+        msg += "；视频有 %d 处断档，最大 %.2f 秒（在 %.1f 秒处）" % (len(gaps), max(gaps)[0], max(gaps)[1])
+    ap = audio_packets(path)
+    if not ap:
+        msg += "；没有音频"
+    else:
+        agaps = [(b[0] - a[0] - a[1], a[0]) for a, b in zip(ap, ap[1:]) if b[0] - a[0] - a[1] > max_gap]
+        msg += "；音频从 %.1f 秒到 %.1f 秒" % (ap[0][0] - ts[0], ap[-1][0] + ap[-1][1] - ts[0])
+        if agaps:
+            ok = False
+            msg += "，有 %d 处没声音的空白，最大 %.2f 秒（在 %.1f 秒处）" % (len(agaps), max(agaps)[0], max(agaps)[1] - ts[0])
+        if ap[-1][0] + ap[-1][1] < ts[-1] - 1.0:
+            ok = False
+            msg += "，比视频早结束"
+    if expected_s and (not duration_ok(dur, expected_s) or dur > expected_s + 25):
         ok = False
         msg += "；与预期 %.0f 秒相差较大" % expected_s
     return ok, msg
