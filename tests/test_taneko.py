@@ -455,6 +455,46 @@ class Ranges(unittest.TestCase):
         self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
         self.assertEqual(calls[0], lo + 2 * 4096)                # 从断开的地方接着下，不从头来
 
+    def test_size_comes_from_the_server(self):
+        """B 站不给确切大小，也要带 Referer：大小从 Content-Range 读，请求头照传。"""
+        import http.server, threading
+        data = self.a.read_bytes()
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.headers.get("Referer") != "https://site.test/":
+                    self.send_response(403); self.end_headers(); return
+                a, b = [int(x) for x in self.headers["Range"].split("=")[1].split("-")]
+                b = min(b, len(data) - 1)
+                self.send_response(206)
+                self.send_header("Content-Range", "bytes %d-%d/%d" % (a, b, len(data)))
+                self.send_header("Content-Length", str(b - a + 1))
+                self.end_headers()
+                self.wfile.write(data[a:b + 1])
+
+            def log_message(self, *a):
+                pass
+
+        for k in ("no_proxy", "NO_PROXY"):
+            os.environ[k] = ",".join(filter(None, [os.environ.get(k), "127.0.0.1"]))
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            url = "http://127.0.0.1:%d/a.m4a" % srv.server_port
+            with self.assertRaises(ranges.Refused):
+                ranges.getter(url)(0, 99)                                  # 没带 Referer
+            get = ranges.getter(url, {"Referer": "https://site.test/"})
+            self.assertIsNone(get.total)
+            init, frags = ranges.index("m4a", get)
+            self.assertEqual(get.total, len(data))
+            t0, lo, hi = ranges.pick(frags, get.total, 10, 20)
+            out = self.dir / "srv.m4a"
+            ranges.download(get, out, init, lo, hi, get.total, log=lambda *_: None)
+            self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_refused_url_is_waited_for(self):
         """YouTube 新地址常常先回 403、等几秒就好：同一个地址等一等再试；一直被拒才抛 Refused。"""
         data, calls = self.a.read_bytes(), []

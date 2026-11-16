@@ -131,7 +131,7 @@ def _formats(j: _Job) -> list:
     info = json.loads(r.stdout.strip().splitlines()[-1])
     fs = info.get("requested_formats") or [info]
     for f in fs:
-        if f.get("protocol") != "https" or not f.get("filesize") or not f.get("url"):
+        if f.get("protocol") != "https" or not f.get("url"):
             raise ranges.NoIndex("格式 %s 不是能按字节读的单个文件" % f.get("format_id"))
     return fs
 
@@ -143,7 +143,7 @@ def _fetch_ranges(j: _Job, w0: float, w1: float, tries: int = 3) -> None:
         try:
             return _ranges_once(j, w0, w1)
         except ranges.Refused:
-            print("YouTube 一直拒绝这个地址（403），重新取地址再试（第 %d/%d 次）。已下的部分不会丢。" % (n, tries), flush=True)
+            print("网站一直拒绝这个地址（403），重新取地址再试（第 %d/%d 次）。已下的部分不会丢。" % (n, tries), flush=True)
     raise ranges.NoIndex("换了 %d 次地址都被拒绝（403）" % tries)
 
 
@@ -156,12 +156,15 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
         if not dst.exists():
             get = ranges.getter(f["url"], f.get("http_headers"))
             init, frags = ranges.index(f["ext"], get)
-            todo.append((f, get, dst, init) + ranges.pick(frags, f["filesize"], w0, w1)[1:])
+            size = f.get("filesize") or get.total   # B 站等网站不给确切大小，用服务器报的
+            if not size:
+                raise ranges.NoIndex("不知道格式 %s 的文件大小" % f.get("format_id"))
+            todo.append((f, get, dst, init, size) + ranges.pick(frags, size, w0, w1)[1:])
     j.parts.mkdir(exist_ok=True)
-    for f, get, dst, init, lo, hi in todo:
-        print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, f["filesize"] / 2**20))
+    for f, get, dst, init, size, lo, hi in todo:
+        print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, size / 2**20))
         try:
-            ranges.download(get, dst, init, lo, hi, f["filesize"], log=lambda m: print(m, flush=True))
+            ranges.download(get, dst, init, lo, hi, size, log=lambda m: print(m, flush=True))
         except ranges.Refused:
             raise
         except OSError as e:

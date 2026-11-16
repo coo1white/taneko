@@ -25,19 +25,25 @@ class Refused(OSError):
 
 
 def getter(url: str, headers=None, timeout=60):
-    """返回 get(a, b)：读字节 a..b（含两端）。"""
+    """返回 get(a, b)：读字节 a..b（含两端）。读过一次后，get.total 是服务器报的文件总大小（没报则为 None）。"""
     def get(a, b):
         h = dict(headers or {}, Range="bytes=%d-%d" % (a, b))
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
                 data = r.read()
+                total = (r.headers.get("Content-Range") or "").rpartition("/")[2]
+                if total.isdigit():
+                    get.total = int(total)
         except urllib.error.HTTPError as e:
             if e.code == 403:
                 raise Refused("服务器拒绝了这个地址（HTTP 403）") from e
             raise
+        if get.total and b >= get.total:
+            b = get.total - 1   # 要的范围超过了文件末尾（文件比要读的头还小），服务器只给到末尾
         if len(data) != b - a + 1:
             raise OSError("服务器返回了 %d 字节，应为 %d 字节" % (len(data), b - a + 1))
         return data
+    get.total = None
     return get
 
 
