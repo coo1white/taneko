@@ -5,8 +5,6 @@
 > 下载长视频里的一段。断了接着下，不用重来。
 > Download part of a long video. If it stops, run it again and it picks up where it stopped.
 
-比如：一场 9 小时的直播，你只要第 3 局。Taneko 只下这一段；网断了，再跑一次同样的命令，它从断的地方接着下。
-
 ## 它能做什么
 
 - **只下你要的一段**：写好开始和结束时间，只下这段，速度和下整条一样。
