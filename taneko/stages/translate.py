@@ -77,6 +77,29 @@ def translate_segments(en, segdir, run_one, size=200):
     return merged
 
 
+def _tool_args(meta: dict, cfg: dict) -> list:
+    """llm-subtrans 的参数：服务、模型，加上项目自己的领域、名字、术语和额外要求。"""
+    pt = meta.get("translate", {})
+    title = pt.get("moviename") or meta.get("bili", {}).get("title", "")
+    args = ["-s", cfg["server"], "-e", cfg["endpoint"], "-m", cfg["model"], "--chat", "--systemmessages",
+            "-l", cfg["target_language"], "--temperature", str(cfg["temperature"]),
+            "--maxbatchsize", str(cfg["max_batch_size"]), "--autosplit"]
+    if title:
+        args += ["--moviename", title]
+    if pt.get("description"):
+        args += ["--description", pt["description"]]
+    for n in list(cfg.get("names", [])) + list(pt.get("names", [])):
+        args += ["--name", n]
+    for t_ in list(cfg.get("terminology", [])) + list(pt.get("terminology", [])):
+        args += ["--terminology", t_]          # 格式 “英文::译法”
+    instr = list(cfg.get("instructions", []))
+    if pt.get("domain"):
+        instr.insert(0, "这是一段%s领域的字幕，术语请按该领域的通行译法。" % pt["domain"])
+    for t_ in instr + list(pt.get("instructions", [])):
+        args += ["--instruction", t_]
+    return args
+
+
 def cmd_translate(a) -> None:
     """用 llm-subtrans + 你自己的 API（OpenCode）把 en.srt 译成 zh.srt。密钥只放内存，不写文件。"""
     import getpass
@@ -105,27 +128,7 @@ def cmd_translate(a) -> None:
         out = d / ("zh_test_%s.srt" % (a.effort or "cfg"))
     else:
         src, out = d / "en.srt", d / "zh_raw.srt"
-    pt = meta.get("translate", {})          # 每个项目自己的领域、术语、额外要求
-    title = pt.get("moviename") or meta.get("bili", {}).get("title", "")
-    cmd = [str(py), str(script), str(src), "-o", str(out),
-           "-s", cfg["server"], "-e", cfg["endpoint"], "-m", cfg["model"],
-           "--chat", "--systemmessages",
-           "-l", cfg["target_language"], "--temperature", str(cfg["temperature"]),
-           "--maxbatchsize", str(cfg["max_batch_size"]), "--autosplit"]
-    if title:
-        cmd += ["--moviename", title]
-    if pt.get("description"):
-        cmd += ["--description", pt["description"]]
-    for n in list(cfg.get("names", [])) + list(pt.get("names", [])):
-        cmd += ["--name", n]
-    for t_ in list(cfg.get("terminology", [])) + list(pt.get("terminology", [])):
-        cmd += ["--terminology", t_]          # 格式 “英文::译法”
-    instr = list(cfg.get("instructions", []))
-    if pt.get("domain"):
-        instr.insert(0, "这是一段%s领域的字幕，术语请按该领域的通行译法。" % pt["domain"])
-    instr += list(pt.get("instructions", []))
-    for t_ in instr:
-        cmd += ["--instruction", t_]
+    cmd = [str(py), str(script), str(src), "-o", str(out)] + _tool_args(meta, cfg)
     import uuid
     env = dict(os.environ, CUSTOM_API_KEY=key, PYTHONUTF8="1",
                CUSTOM_EXTRA_HEADERS=json.dumps({"x-opencode-session": "taneko-" + uuid.uuid4().hex}))
