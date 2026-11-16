@@ -27,6 +27,7 @@ COMMAND = "python %s/taneko.py" % FRAMEWORK_DIR.name if FROM_SOURCE else "taneko
 EXIT_OK = 0           # 成功；run：全部完成
 EXIT_FAIL = 1         # 出错（见上面的“错误：……”）
 EXIT_USAGE = 2        # 命令行参数不对（argparse）
+EXIT_STOPPED = 130    # 用户按了 Ctrl+C（和 shell 的约定一样：128 + SIGINT）
 
 
 class Fail(Exception):

@@ -24,7 +24,23 @@ def make_video(path, secs):
 
 class ExitCodes(unittest.TestCase):
     def test_codes_are_distinct_and_stable(self):
-        self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE), (0, 1, 2))
+        self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE, core.EXIT_STOPPED), (0, 1, 2, 130))
+
+    def test_ctrl_c_says_how_to_resume(self):
+        old = flow.run
+        flow.run = lambda *a: (_ for _ in ()).throw(KeyboardInterrupt())
+        try:
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cli.main(["run", "x"]), core.EXIT_STOPPED)
+        finally:
+            flow.run = old
+        self.assertIn("接着下", out.getvalue())
+
+    def test_version(self):
+        import taneko
+        with redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit) as cm:
+            cli.main(["--version"])
+        self.assertEqual((cm.exception.code, out.getvalue().strip()), (0, "taneko " + taneko.__version__))
 
     def test_die_exits_with_fail(self):
         with self.assertRaises(core.Fail):
@@ -618,7 +634,7 @@ class Layers(unittest.TestCase):
                     self.assertFalse(len(rel) > 1 and n.level == 1, "%s 引用了同层的其他阶段" % where)
                     targets = [n.module.split(".")[0]] if n.module else [a.name for a in n.names]
                     for t in targets:
-                        if t != layer:
+                        if t != layer and not t.startswith("__"):     # __version__ 来自包本身，不是一层
                             self.assertIn(t, self.ALLOWED[layer], "%s 不能引用 %s" % (where, t))
 
 

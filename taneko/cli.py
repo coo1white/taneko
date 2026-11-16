@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import core, doctor, flow, project
+from . import __version__, core, doctor, flow, project
 
 
 def cmd_init(a) -> None:
@@ -26,6 +26,7 @@ EXAMPLES = """例子：
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="taneko", description="下载视频的一段：只下需要的部分，断了能接着下。",
                                  epilog=EXAMPLES, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version="taneko " + __version__)
     sp = ap.add_subparsers(dest="cmd", required=True, metavar="命令", title="常用命令")
     p = sp.add_parser("init", help="新建项目：写好 meta.json")
     p.add_argument("name", help="项目名，可带分组，例如 lol-worlds/game3"); p.add_argument("url", help="视频地址")
@@ -62,4 +63,7 @@ def main(argv=None) -> int:
     except core.Fail as e:
         print("错误：%s" % e)
         return core.EXIT_FAIL
+    except KeyboardInterrupt:       # Ctrl+C：不打 Python 的报错，告诉用户怎么接着下
+        print("\n已停止。已下的部分都留着，重跑同一条命令会接着下。")
+        return core.EXIT_STOPPED
     return rc if isinstance(rc, int) else core.EXIT_OK
