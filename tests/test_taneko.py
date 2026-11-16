@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
-from taneko import cli, core, flow, keys, project, srt  # noqa: E402
+from taneko import cli, core, doctor, flow, keys, project, srt  # noqa: E402
 from taneko import stitch  # noqa: E402
 from taneko.stages import fetch, translate  # noqa: E402
 
@@ -91,6 +91,27 @@ class Lookup(unittest.TestCase):
             project.project_dir("look-hidden")
         self.assertNotIn("look-hidden", [d.name for d in project.dirs()])
         self.assertIn(self.b, project.dirs())
+
+
+class Doctor(unittest.TestCase):
+    def test_missing_tool_fails_and_says_how_to_install(self):
+        old = os.environ["PATH"]
+        os.environ["PATH"] = str(TMP / "empty")       # 什么工具都找不到
+        try:
+            rows = {name: (must, ok, msg) for must, name, ok, msg in doctor.checks("darwin")}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["doctor"])
+        finally:
+            os.environ["PATH"] = old
+        self.assertEqual(rc, core.EXIT_FAIL)
+        self.assertEqual(rows["ffmpeg"], (True, False, "没找到。装法：brew install ffmpeg"))
+        self.assertFalse(rows["Whisper 转写（字幕，实验性）"][0])  # 字幕工具是可选的
+        self.assertIn("还缺：", buf.getvalue())
+
+    def test_install_hints_per_platform(self):
+        self.assertEqual(doctor._how("deno", "win32"), "winget install DenoLand.Deno")
+        self.assertEqual(doctor._how("ffmpeg", "linux"), "sudo apt install ffmpeg")
 
 
 class ApiKey(unittest.TestCase):
@@ -389,9 +410,9 @@ class Seams(unittest.TestCase):
 
 class Layers(unittest.TestCase):
     """依赖只往下走：cli → flow → stages → project / srt / keys / stitch → core。阶段之间互不引用。"""
-    ALLOWED = {"core": set(), "stitch": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"},
+    ALLOWED = {"core": set(), "stitch": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
                "stages": {"core", "project", "srt", "keys", "stitch"}, "flow": {"core", "project", "stages"},
-               "cli": {"core", "flow", "keys", "project"}}
+               "cli": {"core", "doctor", "flow", "keys", "project"}}
 
     def test_imports_only_go_down(self):
         import ast

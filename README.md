@@ -34,7 +34,9 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper)（单独的 venv，建议 CUDA 显卡） | 转写 `asr` | 没有现成字幕时要 |
 | [llm-subtrans](https://github.com/machinewrapped/llm-subtrans) + 一个 OpenAI 兼容接口的密钥 | 翻译 `translate` | 要翻译时要 |
 
-装好后，把 `config/asr.json` 里的 `home` 改成你的 Whisper 目录。
+装好后运行 `python taneko.py doctor`：它逐项检查，缺什么就告诉你在这个系统上怎么装。只下载视频时，字幕那两项（Whisper、llm-subtrans）可以不装。
+
+要用字幕时，把 `config/asr.json` 里的 `home` 改成你的 Whisper 目录。
 
 ### 2. 建一个项目
 

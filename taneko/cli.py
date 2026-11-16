@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""命令行：run / status / approve / key，以及每个阶段的单独命令（由阶段自己提供选项）。"""
+"""命令行：run / status / approve / doctor / key，以及每个阶段的单独命令（由阶段自己提供选项）。"""
 from __future__ import annotations
 
 import argparse
 
-from . import core, flow, keys, project
+from . import core, doctor, flow, keys, project
 
 
 def cmd_approve(a) -> None:
@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=lambda a: flow.status(a.project, a.json))
     p = sp.add_parser("approve", help="通过人工检查点")
     p.add_argument("project"); p.add_argument("what", choices=["terms", "spot"]); p.set_defaults(fn=cmd_approve)
+    p = sp.add_parser("doctor", help="检查这台机器缺什么工具，并告诉你怎么装")
+    p.set_defaults(fn=doctor.cmd_doctor)
     p = sp.add_parser("key", help="管理翻译用的 API 密钥（输入时不显示）")
     p.add_argument("action", choices=["set", "status", "check", "clear"]); p.set_defaults(fn=keys.cmd_key)
     for st in flow.STAGES.values():
