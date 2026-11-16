@@ -606,7 +606,7 @@ class Progress(unittest.TestCase):
     def test_whole_video_adds_video_and_audio(self):
         lines = ["SIZES [100, 50] 150", "GOT 0 399", "GOT 100 399", "[Merger] Merging formats", "GOT 25 251", "GOT 50 251"]
         with redirect_stdout(self.Out(False)) as out:
-            fetch._whole_progress(lines)
+            progress.from_ytdlp(lines)
         text = out.getvalue()
         self.assertIn(" 83%", text)                   # (100 + 25) / 150
         self.assertIn("[Merger] Merging formats", text)

@@ -116,7 +116,7 @@ def _fetch_whole(j: _Job) -> None:
         "-O", "before_dl:SIZES %(requested_formats.:.filesize)j %(filesize,filesize_approx)j",
         "--progress-template", "download:GOT %(progress.downloaded_bytes)s %(info.format_id)s",
         "-P", str(j.d), "-o", j.name + ".%(ext)s", j.url], stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-    rc = _whole_progress(p.stdout)
+    rc = progress.from_ytdlp(p.stdout)
     rc = p.wait() or rc
     if rc != 0 or not j.out.exists():
         die("下载没有完成（退出码 %s）。重跑同一条命令会接着下。" % rc)
@@ -127,37 +127,17 @@ def _fetch_whole(j: _Job) -> None:
     print("完成：%s" % j.out)
 
 
-def _whole_progress(lines) -> int:
-    """读 yt-dlp 的输出，画成一行总进度（画面和声音合起来）。返回 0；其他输出原样显示。"""
-    bar, sizes, done, cur, first = None, [], 0, None, {}
-    for line in lines:
-        kind, _, rest = line.strip().partition(" ")
-        if kind == "SIZES":
-            a, _, b = rest.rpartition(" ")     # 第一项是列表（里面有空格），最后一项是单个大小
-            try:
-                sizes = [x for x in (json.loads(a) if a.startswith("[") else [json.loads(b)]) if x]
-            except ValueError:      # 网站没给大小：只显示 yt-dlp 自己的输出
-                sizes = []
-            bar = progress.Bar(sum(sizes)) if sizes else None
-        elif kind == "GOT" and bar and rest.split()[0].isdigit():
-            have, fid = int(rest.split()[0]), rest.split()[-1]
-            if fid != cur:
-                done, cur = done + first.get(cur, (0, 0))[1], fid
-            first.setdefault(fid, [have, 0])[1] = have
-            bar.update(done + have, sum(h - s for s, h in first.values()))
-        elif kind != "GOT":
-            (bar.note if bar else print)(line.rstrip())
-    if bar:
-        bar.close()
-    return 0
-
-
 def _formats(j: _Job) -> list:
     """yt-dlp 选中的格式（视频+音频时是两个）。不是单个文件、也不是 HLS 播放列表，就抛 NoIndex。"""
-    r = subprocess.run(j.ytdlp + ["-q", "--no-warnings", "-j"] + j.cookies + ["-f", j.fmt, j.url],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0 or not r.stdout.strip():
-        raise ranges.NoIndex("yt-dlp 读不到格式信息（退出码 %s）" % r.returncode)
+    for n in (1, 2):    # B 站等偶尔临时拒绝，过几秒再试一次就好（2026-11-17 在 WSL 上遇到）
+        r = subprocess.run(j.ytdlp + ["-q", "--no-warnings", "-j"] + j.cookies + ["-f", j.fmt, j.url],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode == 0 and r.stdout.strip():
+            break
+        time.sleep(5 * (n < 2))
+    else:
+        why = (r.stderr.strip().splitlines() or ["退出码 %s" % r.returncode])[-1][:200]
+        raise ranges.NoIndex("yt-dlp 读不到格式信息：%s" % why)
     info = json.loads(r.stdout.strip().splitlines()[-1])
     fs = info.get("requested_formats") or [info]
     for f in fs:
@@ -288,8 +268,8 @@ def _plan(j: _Job, w0: float, w1: float, seed: Path):
     return plan, use_seed
 
 
-def _probe(j: _Job, a0: float) -> None:
-    """先用 20 秒小片试探：确认 -copyts 真的保留了绝对时间戳。"""
+def _probe(j: _Job, a0: float) -> float:
+    """先用 20 秒小片试探：确认 -copyts 真的保留了绝对时间戳。返回 a0 之前最近的关键帧（秒）。"""
     probe = j.parts / "probe.mkv"
     probe.unlink(missing_ok=True)
     print("先试探 20 秒，确认时间戳正常……")
@@ -301,6 +281,7 @@ def _probe(j: _Job, a0: float) -> None:
         die("-copyts 没有生效：试探片的起点是 %.1f 秒，应约为 %.0f 秒。请升级 yt-dlp 和 ffmpeg 后重试。" % (pk[0][0], a0))
     probe.unlink()
     print("  时间戳正常（起点 %.1f 秒）" % pk[0][0])
+    return pk[0][0]
 
 
 def _download(j: _Job, plan: list, pending: list) -> None:
@@ -377,7 +358,9 @@ def cmd_fetch(a) -> None:
             pending.append(p)
     print("共 %d 片，已完成 %d 片，还要下 %d 片" % (len(plan), len(plan) - len(pending), len(pending)))
     if pending and len(pending) == len(plan):
-        _probe(j, plan[0]["a"])
+        k = _probe(j, plan[0]["a"])
+        if not use_seed and k < plan[0]["a"]:
+            plan[0]["a"] = k        # 第一片从关键帧开始下：音频也从这里开始，开头不会没声音
     if pending:
         _download(j, plan, pending)
     _finish(j, plan, seed, use_seed, w1 - w0)

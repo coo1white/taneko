@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """一行进度：百分比、已下 / 总共、速度、还要多久。在终端里原地刷新；输出不是终端时（存进文件、给脚本读）
 每 10% 打一行，不刷屏。只用标准库。"""
+import json
 import sys
 import time
 
@@ -70,3 +71,28 @@ class Bar:
         if self.tty and self.width:
             self.out.write("\n")
             self.out.flush()
+
+
+def from_ytdlp(lines) -> int:
+    """读 yt-dlp 的输出，画成一行总进度（画面和声音合起来）。返回 0；其他输出原样显示。"""
+    bar, sizes, done, cur, first = None, [], 0, None, {}
+    for line in lines:
+        kind, _, rest = line.strip().partition(" ")
+        if kind == "SIZES":
+            a, _, b = rest.rpartition(" ")     # 第一项是列表（里面有空格），最后一项是单个大小
+            try:
+                sizes = [x for x in (json.loads(a) if a.startswith("[") else [json.loads(b)]) if x]
+            except ValueError:      # 网站没给大小：只显示 yt-dlp 自己的输出
+                sizes = []
+            bar = Bar(sum(sizes)) if sizes else None
+        elif kind == "GOT" and bar and rest.split()[0].isdigit():
+            have, fid = int(rest.split()[0]), rest.split()[-1]
+            if fid != cur:
+                done, cur = done + first.get(cur, (0, 0))[1], fid
+            first.setdefault(fid, [have, 0])[1] = have
+            bar.update(done + have, sum(h - s for s, h in first.values()))
+        elif kind != "GOT":
+            (bar.note if bar else print)(line.rstrip())
+    if bar:
+        bar.close()
+    return 0
