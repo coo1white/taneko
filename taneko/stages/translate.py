@@ -30,7 +30,7 @@ def ensure_header_patch(tool: Path) -> None:
     if PATCH_MARK not in t:
         old = "        additional_headers = settings.get('additional_headers', {})  # Keep dict access for complex types\n"
         if old not in t:
-            die("翻译工具版本不同，无法自动打补丁，请把 CustomClient.py 的 _add_additional_headers 发给我")
+            die("翻译工具 llm-subtrans 的版本和 taneko 不匹配，无法自动打补丁（_add_additional_headers）。请换成已验证的版本，或在 GitHub 开 issue 报告你的版本号")
         t = t.replace(old, old + ("        " + PATCH_MARK + "\n"
                  "        import os as _os, json as _json\n"
                  "        try:\n"
@@ -40,7 +40,7 @@ def ensure_header_patch(tool: Path) -> None:
     if BODY_MARK not in t:
         old = "        prompt : TranslationPrompt = request.prompt\n        if self.supports_conversation:\n            request_body['messages']"
         if old not in t:
-            die("翻译工具版本不同，无法给请求体打补丁，请把 CustomClient.py 的 _generate_request_body 发给我")
+            die("翻译工具 llm-subtrans 的版本和 taneko 不匹配，无法给请求体打补丁（_generate_request_body）。请换成已验证的版本，或在 GitHub 开 issue 报告你的版本号")
         t = t.replace(old, ("        " + BODY_MARK + "\n"
                  "        import os as _os, json as _json\n"
                  "        try:\n"
@@ -152,7 +152,7 @@ def cmd_translate(a) -> None:
     if a.test:
         print("开始翻译 %d 条（测试）…" % a.test)
         if not run_one(src, out):
-            die("翻译没有成功。把上面最后几行报错发给我，不要发密钥。")
+            die("翻译没有成功。看上面最后几行报错；常见原因：密钥无效或余额不足（用 taneko key check 检查）、网络不通。")
         zh = read_cues(out)
         print("\n测试结果（前 %d 条）：" % min(8, len(zh)))
         for e, z in list(zip(en, zh))[:8]:

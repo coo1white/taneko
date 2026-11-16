@@ -224,6 +224,21 @@ class Flow(unittest.TestCase):
     def test_plan_method_none_is_download_only(self):
         self.assertEqual(flow.plan({"subtitle": {"method": "none", "source_lang": "en"}}), ["fetch"])
 
+    def test_status_json_for_scripts(self):
+        make_project("js1", self.meta())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = cli.main(["status", "--json", "js1"])
+        self.assertEqual(rc, core.EXIT_OK)
+        (row,) = json.loads(buf.getvalue())["projects"]
+        self.assertEqual((row["project"], row["next"], row["needs_human"]), ("js1", "fetch", False))
+        self.assertEqual([s["state"] for s in row["steps"]][:2], ["next", "todo"])
+        self.assertEqual(row["steps"][0]["name"], "fetch")
+
+    def test_no_error_says_send_it_to_me(self):
+        src = "".join(f.read_text("utf-8") for f in Path(core.__file__).parent.rglob("*.py"))
+        self.assertNotIn("发给我", src)
+
     def test_fetch_done_requires_full_duration(self):
         d = make_project("p1", self.meta())
         self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))

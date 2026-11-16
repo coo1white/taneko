@@ -60,6 +60,7 @@ Taneko 只用 Python 标准库，但要调用下面这些工具，请自行安�
 python taneko.py run my-project             # 往下跑，遇到人工检查点停下
 python taneko.py status                     # 所有项目的进度
 python taneko.py status my-project          # 单个项目的每一步
+python taneko.py status --json               # 同样的进度，JSON 格式，给脚本和 agent 读
 python taneko.py run .                      # 在项目文件夹里运行；也可以给完整路径
 python taneko.py approve my-project terms   # 术语校对完，放行
 python taneko.py approve my-project spot    # 抽查完，放行
@@ -84,6 +85,8 @@ python taneko.py approve my-project spot    # 抽查完，放行
 | `1` | 出错（输出里有“错误：……”） | 看报错，修了再重跑 |
 | `2` | 命令行参数不对 | 看 `--help` |
 | `10` | `run` 停在人工检查点（不是失败） | 人处理后 `approve`，再重新 `run` |
+
+`status --json` 给出每个项目的 `next`（下一步）、`needs_human`（是否在等人）和每一步的 `state`（`done` / `skip` / `next` / `todo`）。
 
 ## 配置
 

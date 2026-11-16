@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from . import core, project
@@ -75,12 +76,20 @@ def run(name: str, until=None, jobs: int = 1) -> int:
     return core.EXIT_OK
 
 
-def status(name=None) -> None:
+def status(name=None, as_json=False) -> None:
+    """给人看：每个项目的下一步和每一步的状态。as_json：同样的内容，给脚本和 agent 读。"""
+    rows = []
     for d in [project.project_dir(name)] if name else project.dirs():
-        n = d.name
         snap = snapshot(d, project.load_meta(d))
         nxt = next((s for s, st in snap if st == "next"), None)
-        print("%s  %s" % (n, "已完成" if nxt is None else "下一步：" + STAGES[nxt].label))
-        if name or nxt is not None:
-            for s, st in snap:
-                print("   %s %s" % (MARK[st], STAGES[s].label))
+        rows.append({"project": d.name, "dir": str(d), "next": nxt,
+                     "needs_human": bool(nxt) and STAGES[nxt].run is None,
+                     "steps": [{"name": s, "label": STAGES[s].label, "state": st} for s, st in snap]})
+    if as_json:
+        print(json.dumps({"projects": rows}, ensure_ascii=False, indent=2))
+        return
+    for r in rows:
+        print("%s  %s" % (r["project"], "已完成" if r["next"] is None else "下一步：" + STAGES[r["next"]].label))
+        if name or r["next"] is not None:
+            for st in r["steps"]:
+                print("   %s %s" % (MARK[st["state"]], st["label"]))

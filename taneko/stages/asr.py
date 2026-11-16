@@ -50,7 +50,7 @@ def cmd_asr(a) -> None:
     print("开始转写%s：%s" % ("（只转前 %d 分钟）" % a.test if a.test else "", video.name))
     rc = subprocess.call(cmd, env=env)
     if rc != 0 or not out.exists():
-        die("转写没有成功（退出码 %s）。把上面最后几行报错发给我。" % rc)
+        die("转写没有成功（退出码 %s）。看上面最后几行报错；常见原因：显卡驱动或显存不够、模型没下载完、视频里没有音频。" % rc)
     cues = read_cues(out)
     print("\n共 %d 条。前 8 条：" % len(cues))
     for c in cues[:8]:
