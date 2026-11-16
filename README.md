@@ -8,8 +8,8 @@
 
 *Stay with me, even when the connection drops.*
 
-> 下载长视频里的一段。断了接着下，不用重来。
-> Download part of a long video. If it stops, run it again and it picks up where it stopped.
+> 只下长视频里的一段：和下整条一样快，断了接着下。
+> Download just one part of a long video: as fast as the whole file, and it resumes if it stops.
 
 ## 它能做什么
 
@@ -18,10 +18,19 @@
 - **旧的半截文件接着用**：以前没下完的文件放进项目文件夹，Taneko 找到它对应的时间，只补缺的部分。
 - **画质不变**：不重新编码。下完自动检查画面有没有断档、声音有没有空白。
 
-## 适合你吗？
+## 为什么不直接用 yt-dlp？
 
-- **适合**：只要长视频里的一段，比如 9 小时直播里的一局；或者网络不稳，下大文件常常断。
-- **不太需要**：只下完整的短视频、网络也稳。直接用 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 就够了，Taneko 本来也是用它取视频。
+下**整条**视频时，[yt-dlp](https://github.com/yt-dlp/yt-dlp) 自己就能续传，不需要 Taneko。只下**一段**时就不一样了：
+
+| 下 9 小时直播里的 5 分钟 | yt-dlp `--download-sections` | Taneko |
+|---|---|---|
+| 用时 | 176 秒 | 约 50 秒 |
+| 中途关掉终端，再跑一次 | 从零开始 | 接着下 |
+
+2026-11-16 在 Windows 上实测，YouTube 1440p。yt-dlp 下一段时改用 ffmpeg 下载，ffmpeg 不能续传。Taneko 读视频文件自带的索引，只下这一段的字节。
+
+- **适合**：只要长视频里的一段，比如 9 小时直播里的一局。
+- **不太需要**：只下整条视频。直接用 yt-dlp 就够了，Taneko 本来也是用它取视频地址。
 
 ## 快速上手
 
