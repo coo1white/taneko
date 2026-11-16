@@ -76,7 +76,11 @@ def load_config(name: str) -> dict:
 
 # ---------------------------------------------------------------- 外部工具
 def tool_cmd(exe: str, module: str) -> list:
-    """优先用 PATH 里的可执行文件，否则找用户目录的 Scripts，最后退回 python -m 模块。"""
+    """优先用和 taneko 装在一起的模块（pip 安装 taneko 时会带上 yt-dlp），
+    再找 PATH 里的可执行文件和用户目录的 Scripts，最后退回 python -m 模块。"""
+    import importlib.util
+    if importlib.util.find_spec(module):
+        return [sys.executable, "-m", module]
     p = shutil.which(exe)
     if not p:
         import site

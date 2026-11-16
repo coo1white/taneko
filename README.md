@@ -3,7 +3,6 @@
 [![test](https://github.com/coo1white/taneko/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/coo1white/taneko/actions/workflows/test.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#快速上手5-分钟)
-[![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 *Stay with me, even when the connection drops.*
@@ -261,7 +260,7 @@ python taneko/taneko.py key clear    # 删除
 
 | 层 | 用到的东西 | 做什么 |
 |---|---|---|
-| 语言 | Python 3.11+，只用标准库 | 整个框架，没有第三方 Python 依赖 |
+| 语言 | Python 3.11+，代码只用标准库 | 整个框架。唯一的依赖是 yt-dlp，pip 安装时一起装上，只作为命令调用 |
 | 下载 | yt-dlp（Unlicense）+ deno + 浏览器登录信息 | 取视频地址，子进程调用 |
 | 按索引下载 | HTTP Range 请求，读 MP4 `sidx` 和 WebM Cues（标准库自己写） | 只下需要的字节，断了接着下 |
 | 媒体处理 | FFmpeg / ffprobe（LGPL 2.1+，视构建方式可能为 GPL） | 无损截取、拼接、检查，子进程调用 |

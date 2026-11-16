@@ -384,7 +384,7 @@ class Packaging(unittest.TestCase):
         self.assertTrue(list((root / "taneko" / "config").glob("*.json")))
         self.assertEqual(conf["project"]["scripts"]["taneko"], "taneko.cli:main")
         self.assertEqual(conf["project"]["requires-python"], ">=3.11")
-        self.assertEqual(conf["project"]["dependencies"], [])   # 只用标准库
+        self.assertEqual(conf["project"]["dependencies"], ["yt-dlp[default]>=2026.10.26"])   # 唯一的依赖，只作为命令调用
         import taneko
         self.assertEqual(conf["project"]["version"], taneko.__version__)
 

@@ -10,7 +10,8 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = []
+# yt-dlp 只作为命令调用，不 import；带上它，新手就不用另装。[default] 是 yt-dlp 推荐的 pip 装法
+dependencies = ["yt-dlp[default]>=2026.10.26"]
 keywords = ["video", "download", "resume", "yt-dlp", "ffmpeg"]
 classifiers = [
     "Environment :: Console",

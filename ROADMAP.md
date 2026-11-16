@@ -100,7 +100,8 @@ flowchart LR
 | 2026-11-16 | 下载方式按要下载的时长占全片的比例来定，不按文件大小切片 | 同一条音频实测：整条下载（yt-dlp 自带下载器）8.76 MiB/s，510 MiB 用 58 秒；分段下载（走 ffmpeg）只有约 2 倍实时速度，同样内容要 2 个多小时。整条下载本身就能断点续传（`.part`），按大小切片不会让续传更稳，反而多出接缝（2026-11-16 之前的没声音空白就出在接缝），而且按字节切不准时间点。代价：先整条下载要占更多硬盘 |
 | 2026-11-16 | 下载一段改为按索引下载，取代上一条的“按比例选”和“先整条下载再切” | 读文件自带的索引（MP4 `sidx`、WebM Cues），只下这段的字节：实测 140 和 308 都和整条下载一样快（约 8 MiB/s），不多占硬盘，断了接着下。没有现成工具能直接用（yt-dlp 截一段一定走 ffmpeg；`media-seek` 只算字节范围，GPL-3.0），所以自己用标准库写。没有索引的格式仍用分段下载 |
 | 2026-11-16 | 程序代码超过 2,000 行（2,072 行），暂不拆分 | 从 issue #8 合并起就超了（加了 `ranges.py`，215 行），这次 issue #5 的 `init` 又加了约 40 行，之前没按规定在这里写明，这次补上。下载这一侧约 1,230 行；已暂停的字幕约 840 行（`asr`、`subs`、`terms`、`fix`、`translate`、`check`、`gates`、`keys`、`srt`、`workers/asr_run`）。到 2,300 行前，先把字幕整体拆成插件，而不是调高上限 |
-| 2026-11-16 | pip 安装：`pyproject.toml` 用 setuptools，命令 `taneko`；配置文件移到 `taneko/config/`；装好后项目默认放在用户目录的 `taneko/projects/` | 装好后没有“代码旁边”这个位置，用户目录在三个系统上都有、都能写。从源码运行时照旧放在代码旁边。环境变量 `TANEKO_PROJECTS` 仍然优先。PyPI 上 `taneko` 这个名字 2026-11-16 查过没人用（`pypi.org/pypi/taneko/json` 返回 404）。运行时依赖仍是 0 个 |
+| 2026-11-16 | pip 安装：`pyproject.toml` 用 setuptools，命令 `taneko`；配置文件移到 `taneko/config/`；装好后项目默认放在用户目录的 `taneko/projects/` | 装好后没有“代码旁边”这个位置，用户目录在三个系统上都有、都能写。从源码运行时照旧放在代码旁边。环境变量 `TANEKO_PROJECTS` 仍然优先。PyPI 上 `taneko` 这个名字 2026-11-16 查过没人用（`pypi.org/pypi/taneko/json` 返回 404） |
+| 2026-11-16 | yt-dlp 成为唯一的依赖（`yt-dlp[default]>=2026.10.26`），改掉 2026-11-15 定的“第三方依赖 0 个” | 作者同意。`pipx install taneko` 时一起装好，新手少装一样。taneko 只把它当命令调用（`python -m yt_dlp`），代码里仍不 import 任何第三方包（`tests/test_size.py` 查）。和 taneko 装在一起的 yt-dlp 优先于 PATH 里的。`[default]` 是 yt-dlp 推荐的 pip 装法，带上解 YouTube 验证用的 `yt-dlp-ejs`；deno 仍要另装 |
 
 ## 5. 已知限制
 
