@@ -17,7 +17,7 @@ import threading
 import time
 from pathlib import Path
 
-from .. import hls, ranges, stitch
+from .. import hls, progress, ranges, stitch
 from ..core import Stage, die, span, tool_cmd
 from ..project import find_video, load_meta, project_dir
 
@@ -109,10 +109,14 @@ class _Job:
 
 def _fetch_whole(j: _Job) -> None:
     """整条视频：yt-dlp 直接下，断了重跑会从 .part 接着下；下完检查视频和音频。"""
-    print("下载整条视频，格式 %s（断了重跑同一条命令，会接着下）" % j.fmt)
-    rc = subprocess.call(j.ytdlp + ["--no-warnings"] + j.cookies + [
-        "-f", j.fmt, "--merge-output-format", "mkv", "--remux-video", "mkv",
-        "-P", str(j.d), "-o", j.name + ".%(ext)s", j.url])
+    print("下载整条视频，格式 %s（断了重跑同一条命令，会接着下）" % j.fmt, flush=True)
+    p = subprocess.Popen(j.ytdlp + ["-q", "--no-warnings", "--progress", "--newline"] + j.cookies + [
+        "-f", j.fmt, "--merge-output-format", "mkv", "--remux-video", "mkv", "--no-simulate",
+        "-O", "before_dl:SIZES %(requested_formats.:.filesize)j %(filesize,filesize_approx)j",
+        "--progress-template", "download:GOT %(progress.downloaded_bytes)s %(info.format_id)s",
+        "-P", str(j.d), "-o", j.name + ".%(ext)s", j.url], stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    rc = _whole_progress(p.stdout)
+    rc = p.wait() or rc
     if rc != 0 or not j.out.exists():
         die("下载没有完成（退出码 %s）。重跑同一条命令会接着下。" % rc)
     ok, msg = stitch.verify(j.out)
@@ -120,6 +124,31 @@ def _fetch_whole(j: _Job) -> None:
     if not ok:
         die("%s 没通过检查：%s。删掉它再重跑 fetch。" % (j.out.name, msg))
     print("完成：%s" % j.out)
+
+
+def _whole_progress(lines) -> int:
+    """读 yt-dlp 的输出，画成一行总进度（画面和声音合起来）。返回 0；其他输出原样显示。"""
+    bar, sizes, done, cur, first = None, [], 0, None, {}
+    for line in lines:
+        kind, _, rest = line.strip().partition(" ")
+        if kind == "SIZES":
+            a, _, b = rest.rpartition(" ")     # 第一项是列表（里面有空格），最后一项是单个大小
+            try:
+                sizes = [x for x in (json.loads(a) if a.startswith("[") else [json.loads(b)]) if x]
+            except ValueError:      # 网站没给大小：只显示 yt-dlp 自己的输出
+                sizes = []
+            bar = progress.Bar(sum(sizes)) if sizes else None
+        elif kind == "GOT" and bar and rest.split()[0].isdigit():
+            have, fid = int(rest.split()[0]), rest.split()[-1]
+            if fid != cur:
+                done, cur = done + first.get(cur, (0, 0))[1], fid
+            first.setdefault(fid, [have, 0])[1] = have
+            bar.update(done + have, sum(h - s for s, h in first.values()))
+        elif kind != "GOT":
+            (bar.note if bar else print)(line.rstrip())
+    if bar:
+        bar.close()
+    return 0
 
 
 def _formats(j: _Job) -> list:
@@ -177,12 +206,20 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
     j.parts.mkdir(exist_ok=True)
     for f, get, dst, init, size, lo, hi in todo:
         print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, size / 2**20))
+    bar, fin, last = progress.Bar(sum(t[3] + t[6] - t[5] + 1 for t in todo)), [0, 0], [0]   # 所有格式合起来一个进度
+    for f, get, dst, init, size, lo, hi in todo:
+        def tick(have, got, fin=list(fin)):
+            last[0] = fin[1] + got
+            bar.update(fin[0] + have, last[0])
         try:
-            ranges.download(get, dst, init, lo, hi, size, log=lambda m: print(m, flush=True))
+            ranges.download(get, dst, init, lo, hi, size, log=bar.note, tick=tick)
         except ranges.Refused:
             raise
         except OSError as e:
+            bar.close()
             die("下载中断：%s。已下的部分在 %s，重跑同一条命令会接着下。" % (e, j.parts))
+        fin = [fin[0] + init + hi - lo + 1, last[0]]
+    bar.close()
     _cut(j, files, w0, w1, shift)
 
 

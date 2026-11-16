@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
 from taneko import cli, core, doctor, flow, project  # noqa: E402
-from taneko import hls, ranges, stitch  # noqa: E402
+from taneko import hls, progress, ranges, stitch  # noqa: E402
 from taneko.stages import fetch  # noqa: E402
 
 def make_project(name, meta):
@@ -223,11 +223,11 @@ class Ranges(unittest.TestCase):
     def getter(path, fail_after=None):
         data, calls = path.read_bytes(), [0]
 
-        def get(a, b):
+        def get(a, b, sink=None):
             calls[0] += 1
             if fail_after is not None and calls[0] > fail_after:
                 raise OSError("network down")
-            return data[a:b + 1]
+            return sink(data[a:b + 1]) if sink else data[a:b + 1]
         return data, get
 
     def fetch_range(self, src, ext, a, b, name):
@@ -262,10 +262,29 @@ class Ranges(unittest.TestCase):
         part = out.with_name(out.name + ".part")
         self.assertEqual(part.stat().st_size, init + 2 * 4096)   # 文件头 + 两块，已下的没有丢
         calls = []
-        ranges.download(lambda x, y: calls.append(x) or data[x:y + 1], out, init, lo, hi, len(data),
+        ranges.download(lambda x, y, sink: calls.append(x) or sink(data[x:y + 1]), out, init, lo, hi, len(data),
                         log=lambda *_: None, chunk=4096)
         self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
         self.assertEqual(calls[0], lo + 2 * 4096)                # 从断开的地方接着下，不从头来
+
+    def test_bytes_are_kept_as_they_arrive(self):
+        """网慢时一块要下很久：半块时断了，收到的那半块也留在文件里，重试从那里接着要。"""
+        data, get = self.getter(self.a)
+        init, frags = ranges.index("m4a", get)
+        _, lo, hi = ranges.pick(frags, len(data), 10, 30)
+        out, calls, seen = self.dir / "half.m4a", [], []
+
+        def flaky(a, b, sink):
+            calls.append(a)
+            if len(calls) == 2:          # 第二次请求：只收到一半就断了
+                sink(data[a:a + 1000])
+                raise OSError("connection reset")
+            sink(data[a:b + 1])
+        ranges.download(flaky, out, init, lo, hi, len(data), log=lambda *_: None, chunk=4096,
+                        tick=lambda have, got: seen.append(have))
+        self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
+        self.assertEqual(calls[2], calls[1] + 1000)              # 重试从收到的地方接着要
+        self.assertEqual(seen[-1], init + hi - lo + 1)
 
     def test_size_comes_from_the_server(self):
         """B 站不给确切大小，也要带 Referer：大小从 Content-Range 读，请求头照传。"""
@@ -317,7 +336,7 @@ class Ranges(unittest.TestCase):
                 raise ranges.Refused("403")
             return data[x:y + 1]
 
-        def never(x, y):
+        def never(x, y, sink=None):
             calls.append(x)
             raise ranges.Refused("403")
         old, ranges.REFUSED_WAITS = ranges.REFUSED_WAITS, (0, 0, 0)
@@ -532,10 +551,57 @@ class Seams(unittest.TestCase):
         self.assertFalse(stitch.duration_ok(3270, 3300))
 
 
+class Progress(unittest.TestCase):
+    """一行进度：百分比、大小、速度、还要多久；终端里原地刷新，不是终端时每 10% 一行。"""
+
+    class Out(io.StringIO):
+        def __init__(self, tty):
+            super().__init__(); self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+    def run_bar(self, tty, start=0):
+        out, now = self.Out(tty), [0.0]
+        bar = progress.Bar(100 * 2**20, out=out, clock=lambda: now[0])
+        for k in range(start, 101):
+            now[0] = (k - start) * 0.5            # 每秒 2 MiB
+            bar.update(k * 2**20, (k - start) * 2**20)
+        bar.close()
+        return out.getvalue()
+
+    def test_pipe_gets_one_line_per_tenth(self):
+        lines = self.run_bar(False).splitlines()
+        self.assertEqual(len(lines), 11)
+        self.assertIn("50%  50.0 / 100 MiB", lines[5])
+        self.assertIn("2.0 MiB/s", lines[5])
+        self.assertIn("还要 25 秒", lines[5])
+        self.assertNotIn("\r", "".join(lines))
+
+    def test_terminal_redraws_one_line(self):
+        text = self.run_bar(True)
+        self.assertEqual(text.count("\n"), 1)      # 只在结束时换行
+        self.assertIn("[██████████]  100%", text)
+
+    def test_resume_starts_from_what_is_there(self):
+        first = self.run_bar(False, start=40).splitlines()[0]
+        self.assertIn("40%", first)
+
+    def test_whole_video_adds_video_and_audio(self):
+        lines = ["SIZES [100, 50] 150", "GOT 0 399", "GOT 100 399", "[Merger] Merging formats", "GOT 25 251", "GOT 50 251"]
+        with redirect_stdout(self.Out(False)) as out:
+            fetch._whole_progress(lines)
+        text = out.getvalue()
+        self.assertIn(" 83%", text)                   # (100 + 25) / 150
+        self.assertIn("[Merger] Merging formats", text)
+        self.assertIn("100%", text)
+
+
 class Layers(unittest.TestCase):
-    """依赖只往下走：cli → flow → stages → project / stitch / ranges / hls → core。阶段之间互不引用。"""
-    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "hls": {"ranges"}, "project": {"core"}, "doctor": {"core"},
-               "stages": {"core", "project", "stitch", "ranges", "hls"}, "flow": {"core", "project", "stages"},
+    """依赖只往下走：cli → flow → stages → project / stitch / ranges / hls / progress → core。阶段之间互不引用。"""
+    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "progress": set(), "hls": {"ranges", "progress"},
+               "project": {"core"}, "doctor": {"core"},
+               "stages": {"core", "project", "stitch", "ranges", "hls", "progress"}, "flow": {"core", "project", "stages"},
                "cli": {"core", "doctor", "flow", "project"}}
 
     def test_imports_only_go_down(self):

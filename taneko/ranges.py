@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """按索引下载一段：读文件自带的索引（MP4 的 sidx、WebM 的 Cues），算出这段时间在文件里的字节范围，
-只下这些字节。用的是普通 HTTP Range 请求，按 10 MiB 一块顺序下，断了从已下的字节接着下。
+只下这些字节。用的是普通 HTTP Range 请求，按 10 MiB 一块顺序请求，收到多少写多少，断了从已下的字节接着下。
 
 下来的文件 = 文件头（init）+ 覆盖这段时间的片段，ffmpeg 能直接读；起点是这段之前最近的片段边界。
 没有索引的格式（HLS、直播等）抛 NoIndex，调用方改用分段下载。只用标准库，不引用 taneko 的其他模块。
@@ -25,12 +25,15 @@ class Refused(OSError):
 
 
 def getter(url: str, headers=None, timeout=60):
-    """返回 get(a, b)：读字节 a..b（含两端）。读过一次后，get.total 是服务器报的文件总大小（没报则为 None）。"""
-    def get(a, b):
-        h = dict(headers or {}, Range="bytes=%d-%d" % (a, b))
+    """返回 get(a, b, sink=None)：读字节 a..b（含两端）。给了 sink 就边收边交给它（每次 64 KiB），否则返回全部字节。
+    读过一次后，get.total 是服务器报的文件总大小（没报则为 None）。"""
+    def get(a, b, sink=None):
+        h, data, n = dict(headers or {}, Range="bytes=%d-%d" % (a, b)), [], 0
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
-                data = r.read()
+                for blk in iter(lambda: r.read(65536), b""):
+                    (sink or data.append)(blk)
+                    n += len(blk)
                 total = (r.headers.get("Content-Range") or "").rpartition("/")[2]
                 if total.isdigit():
                     get.total = int(total)
@@ -40,9 +43,9 @@ def getter(url: str, headers=None, timeout=60):
             raise
         if get.total and b >= get.total:
             b = get.total - 1   # 要的范围超过了文件末尾（文件比要读的头还小），服务器只给到末尾
-        if len(data) != b - a + 1:
-            raise OSError("服务器返回了 %d 字节，应为 %d 字节" % (len(data), b - a + 1))
-        return data
+        if n != b - a + 1:
+            raise OSError("服务器返回了 %d 字节，应为 %d 字节" % (n, b - a + 1))
+        return b"".join(data)
     get.total = None
     return get
 
@@ -173,8 +176,9 @@ def pick(frags, size: int, a: float, b: float):
     return frags[lo][0], frags[lo][1], hi
 
 
-def download(get, dst: Path, init: int, lo: int, hi: int, size: int, log=print, chunk=CHUNK, retries=3):
-    """下到 dst.part；旁边的 .json 记着范围，范围和文件大小没变就从已下的字节接着下。完成后改名为 dst。"""
+def download(get, dst: Path, init: int, lo: int, hi: int, size: int, log=print, chunk=CHUNK, retries=3, tick=None):
+    """下到 dst.part，收到多少写多少；旁边的 .json 记着范围，范围和文件大小没变就从已下的字节接着下。完成后改名为 dst。
+    tick(已下字节, 这次收到的字节)：每收到一块调用一次，用来显示进度。"""
     part, state = dst.with_name(dst.name + ".part"), dst.with_name(dst.name + ".json")
     want = {"size": size, "init": init, "lo": lo, "hi": hi}
     try:
@@ -190,15 +194,21 @@ def download(get, dst: Path, init: int, lo: int, hi: int, size: int, log=print, 
         part.unlink(); have = 0
     if have:
         log("  接着上次下：已有 %.1f / %.1f MiB" % (have / 2**20, total / 2**20))
+    got = [have, 0]
+
+    def sink(blk):
+        f.write(blk)
+        got[0] += len(blk); got[1] += len(blk)
+        if tick:
+            tick(got[0], got[1])
+
+    def once(*_):       # 每次（包括重试）都从文件里已有的字节接着要
+        f.flush()
+        a = got[0] if got[0] < init else lo + got[0] - init
+        get(a, min(a + chunk - 1, init - 1 if got[0] < init else hi), sink)
     with open(part, "ab") as f:
-        step = max(total // 10, 1)
-        while have < total:
-            a = have if have < init else lo + have - init
-            b = min(a + chunk - 1, init - 1 if have < init else hi)
-            f.write(_retry(get, a, b, retries)); f.flush()
-            if (have + b - a + 1) // step > have // step:
-                log("  %3d%%  %.1f / %.1f MiB" % ((have + b - a + 1) * 100 // total, (have + b - a + 1) / 2**20, total / 2**20))
-            have += b - a + 1
+        while got[0] < total:
+            _retry(once, 0, 0, retries)
     part.replace(dst)
     state.unlink(missing_ok=True)
 

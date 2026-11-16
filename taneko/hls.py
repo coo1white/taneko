@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .progress import Bar
 from .ranges import NoIndex, Refused, _retry
 
 
@@ -58,7 +59,7 @@ def pick(segs: list, a: float, b: float) -> list:
     return [i for i, (t, d, _) in enumerate(segs) if t + d > a and t < b]
 
 
-def download(fetch, url: str, dst: Path, a: float, b: float, log=print, retries: int = 3) -> float:
+def download(fetch, url: str, dst: Path, a: float, b: float, log=print, retries: int = 3, out=None) -> float:
     """把覆盖 [a, b] 的分片下到 dst（init 在最前）。返回第一片在播放列表里的开始时间（秒）。
     分片先存在 dst.segs/ 里，一片一个文件；dst.json 记着这一段对应的分片，重跑时跳过已下完的。"""
     state = dst.with_name(dst.name + ".json")
@@ -78,15 +79,16 @@ def download(fetch, url: str, dst: Path, a: float, b: float, log=print, retries:
     have = sum(1 for n, _ in jobs if (folder / n).exists())
     if have:
         log("  接着上次下：已有 %d / %d 片" % (have, len(jobs)))
-    step = max(1, len(jobs) // 10)
+    bar, got = Bar(len(jobs), "片", out), 0
     for k, (name, u) in enumerate(jobs, 1):
         p = folder / name
         if not p.exists():
             tmp = p.with_name(name + ".tmp")
             tmp.write_bytes(_retry(lambda *_, u=u: fetch(u), 0, 0, retries))
+            got += tmp.stat().st_size
             tmp.replace(p)
-        if k % step == 0 or k == len(jobs):
-            log("  %3d%%  %d / %d 片" % (k * 100 // len(jobs), k, len(jobs)))
+        bar.update(k, got)
+    bar.close()
     part = dst.with_name(dst.name + ".part")
     with open(part, "wb") as out:
         for name, _ in jobs:

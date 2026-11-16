@@ -229,7 +229,7 @@ def verify(path, expected_s=None, max_gap=0.1, need_audio=False):
         ok = ok and not need_audio
     else:
         agaps = [(b[0] - a[0] - a[1], a[0]) for a, b in zip(ap, ap[1:]) if b[0] - a[0] - a[1] > max_gap]
-        msg += "；音频从 %.1f 秒到 %.1f 秒" % (ap[0][0] - ts[0], ap[-1][0] + ap[-1][1] - ts[0])
+        msg += "；音频从 %.1f 秒到 %.1f 秒" % (round(ap[0][0] - ts[0], 1) + 0.0, ap[-1][0] + ap[-1][1] - ts[0])   # + 0.0：不显示 -0.0
         if agaps:
             ok = False
             msg += "，有 %d 处没声音的空白，最大 %.2f 秒（在 %.1f 秒处）" % (len(agaps), max(agaps)[0], max(agaps)[1] - ts[0])
