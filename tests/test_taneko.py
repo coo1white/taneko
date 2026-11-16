@@ -341,12 +341,15 @@ class Ranges(unittest.TestCase):
         cls.dir = TMP / "ranges"
         cls.dir.mkdir()
         cls.a, cls.v, cls.plain = cls.dir / "a.m4a", cls.dir / "v.webm", cls.dir / "plain.m4a"
+        cls.opus = cls.dir / "a.webm"
         ff = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i"]
         subprocess.run(ff + ["sine=frequency=440:duration=45", "-c:a", "aac", "-f", "mp4", "-movflags", "+dash+global_sidx",
                              "-frag_duration", "2000000", str(cls.a)], check=True)
         subprocess.run(ff + ["mandelbrot=size=64x64:rate=10", "-t", "45", "-c:v", "libvpx", "-g", "25", "-keyint_min", "25",
                              "-b:v", "200k", "-cues_to_front", "1", str(cls.v)], check=True)
         subprocess.run(ff + ["sine=duration=10", "-c:a", "aac", str(cls.plain)], check=True)
+        subprocess.run(ff + ["sine=frequency=440:duration=45", "-c:a", "libopus", "-cluster_time_limit", "2000",
+                             "-cues_to_front", "1", str(cls.opus)], check=True)   # 像 YouTube 的 251
 
     @staticmethod
     def getter(path, fail_after=None):
@@ -443,16 +446,24 @@ class Ranges(unittest.TestCase):
 
     def test_cut_gives_a_clean_section(self):
         v, _ = self.fetch_range(self.v, "webm", 12, 31, "cv.webm")
-        a, _ = self.fetch_range(self.a, "m4a", 12, 31, "ca.m4a")
-        parts = self.dir / "cut"
-        parts.mkdir()
-        j = SimpleNamespace(parts=parts, out=self.dir / "cut.mkv", a=SimpleNamespace(keep=True))
-        with redirect_stdout(io.StringIO()):
-            fetch._cut(j, [(v, True), (a, False)], 12, 31)
-        ok, msg = stitch.verify(j.out, expected_s=19)
-        self.assertTrue(ok, msg)
-        ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
-        self.assertAlmostEqual(ap[0][0] - vp[0][0], 12 - 10, delta=0.05)   # 视频从 10 秒的关键帧开始，音频从 12 秒开始
+        for src, ext in ((self.a, "m4a"), (self.opus, "webm")):   # WebM 音频不能在输入端跳转（Windows 试用时发现）
+            with self.subTest(ext):
+                a, _ = self.fetch_range(src, ext, 12, 31, "ca." + ext)
+                parts = self.dir / ("cut_" + ext)
+                parts.mkdir()
+                j = SimpleNamespace(parts=parts, out=self.dir / ("cut_%s.mkv" % ext), a=SimpleNamespace(keep=True))
+                with redirect_stdout(io.StringIO()):
+                    fetch._cut(j, [(v, True), (a, False)], 12, 31)
+                ok, msg = stitch.verify(j.out, expected_s=19, need_audio=True)
+                self.assertTrue(ok, msg)
+                ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
+                self.assertAlmostEqual(ap[0][0] - vp[0][0], 12 - 10, delta=0.05)   # 视频从 10 秒的关键帧开始，音频从 12 秒开始
+
+    def test_missing_audio_fails_the_check(self):
+        out = self.dir / "silent.mkv"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(self.v), "-c", "copy", str(out)], check=True)
+        self.assertTrue(stitch.verify(out)[0])
+        self.assertFalse(stitch.verify(out, need_audio=True)[0])
 
 
 class Seams(unittest.TestCase):

@@ -20,6 +20,8 @@
 
 下面是最常见的用法：只下视频，不做字幕。
 
+先建一个空文件夹（下文叫“你的文件夹”），在里面打开终端：Windows 用 PowerShell 或 cmd，macOS 和 Linux 用终端。下面所有命令都在这个文件夹里运行。
+
 ### 1. 装工具
 
 | 工具 | 说明 |
@@ -27,7 +29,7 @@
 | [Python](https://www.python.org/downloads/) 3.11 或更新 | 运行 Taneko |
 | [FFmpeg](https://ffmpeg.org/download.html) | 截取和检查视频 |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) 和 [deno](https://deno.com/) | 从网站取视频 |
-| Firefox（可选） | 已登录的 Firefox 能下更多视频，比如会员视频 |
+| Firefox（可选） | Taneko 默认读取 Firefox 的登录信息，能下更多视频，比如会员视频 |
 
 Windows 上可以一次装好（Python 另装）：
 
@@ -49,7 +51,12 @@ git clone https://github.com/coo1white/taneko.git
 python taneko/taneko.py doctor
 ```
 
-缺什么，它会告诉你怎么装。只下视频时，Whisper 和 llm-subtrans 两项不用管。
+缺什么，它会告诉你怎么装。这几项可以先不管：
+
+- Whisper 和 llm-subtrans：只有做字幕才要。
+- 项目目录：第 3 步才建。
+
+Windows 上如果 `python` 不能用，换成 `py`。
 
 ### 3. 建一个项目
 
@@ -74,7 +81,7 @@ python taneko/taneko.py doctor
 ```
 
 - `source_url`：视频地址。
-- `download`：开始-结束时间，可写 `4:13:00`、`13:00` 或 `780`（秒）。不写这一项就下整条视频。
+- `download`：开始-结束时间，可写 `4:13:00`、`13:00` 或 `780`（秒）。多短都行，比如 `4:13:00-4:14:00` 只下 1 分钟。不写这一项就下整条视频。
 - `name`：下好的文件名，这里会得到 `game3.mkv`。
 - `"method": "none"`：只下视频，不做字幕。
 
@@ -84,7 +91,14 @@ python taneko/taneko.py doctor
 python taneko/taneko.py run game3
 ```
 
-下好后，视频在 `projects/game3/game3.mkv`。
+下好后，视频在 `projects/game3/game3.mkv`。屏幕最后会显示检查结果，例如：
+
+```text
+检查结果：视频时长 64.5 秒；音频从 4.5 秒到 64.5 秒
+完成：projects/game3/game3.mkv
+```
+
+视频比你要的长几秒，这是正常的：画面要从开始时间之前最近的关键帧开始，才能不重新编码。声音正好从开始时间开始。检查没通过时，会显示“错误：”和原因，不会覆盖旧文件。
 
 **中途断了？** 再跑一次同样的命令。
 
@@ -219,7 +233,7 @@ python taneko/taneko.py key clear    # 删除
 |---|---|
 | 分段下载、半截文件对齐、拼接：一局 55 分钟的 1440p60 视频，复用 41 分钟的旧文件，对齐误差 0.00，视频无断档。2026-11-16 前拼的文件接缝处有 0.5～3.5 秒没声音，已修复（issue [#1](../../issues/1)） | 转写、术语校对、翻译（实验性，暂停开发） |
 | 按索引下载一段（issue [#8](../../issues/8)）：YouTube 1440p60，中途强行停掉再跑，从已下的 160 MiB 接着下；画面和整条下载逐字节相同，音画差 5～21 毫秒；约 8 MiB/s（分段下载约 2 倍实时） | B 站、X 等网站的按索引下载 |
-| Windows 上按索引下载：用 Firefox 登录信息，3 次都成功，每次约 50 秒（分段下载 176 秒） | macOS、Linux 上的真实下载（只有自动测试） |
+| Windows 上按索引下载：用 Firefox 登录信息，格式 308+140 跑了 3 次都成功，每次约 50 秒（分段下载 176 秒）；默认格式（AV1 + Opus）照快速上手走了一遍 | macOS、Linux 上的真实下载（只有自动测试） |
 | 多片同时下载（`--jobs 2`）：同一场比赛的另外 4 段 | |
 | 流程、人工检查点、退出码、分段翻译：有自动测试 | |
 

@@ -184,16 +184,21 @@ def _cut(j: _Job, files: list, w0: float, w1: float) -> None:
     if not pk:
         die("%s 读不出内容。删掉 %s 再重跑 fetch。" % (vids[0].name, j.parts))
     k0, tmp = pk[0][0], j.parts / "_out.mkv"
-    cmd = [shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-y", "-i", str(vids[0])]
+    # 下好的文件只有一部分字节，ffmpeg 会说“文件提前结束”，这是正常的，所以只显示致命错误
+    ff = [shutil.which("ffmpeg") or "ffmpeg", "-v", "fatal", "-y"]
+    cmd = ff + ["-i", str(vids[0])]
     if auds:
-        a0 = stitch.audio_packets(auds[0])[0][0]
-        cmd += ["-itsoffset", "%.3f" % max(0.0, w0 - k0), "-ss", "%.3f" % max(0.0, w0 - a0), "-i", str(auds[0]),
-                "-map", "0:v", "-map", "1:a"]
+        a0, acut = stitch.audio_packets(auds[0])[0][0], j.parts / "_a.mka"
+        # 在输出端截：WebM 的索引指向原文件的字节位置，在输入端跳转会读不到任何音频
+        if subprocess.call(ff + ["-i", str(auds[0]), "-ss", "%.3f" % max(0.0, w0 - a0), "-map", "0:a:0",
+                                 "-c", "copy", str(acut)]) != 0:
+            die("截取音频失败。下好的文件在 %s，不会丢。" % j.parts)
+        cmd += ["-itsoffset", "%.3f" % max(0.0, w0 - k0), "-i", str(acut), "-map", "0:v", "-map", "1:a"]
     else:
         cmd += ["-map", "0"]
     if subprocess.call(cmd + ["-c", "copy", "-t", "%.3f" % (w1 - k0), str(tmp)]) != 0:
         die("切出这一段失败。下好的文件在 %s，不会丢。" % j.parts)
-    ok, msg = stitch.verify(tmp, expected_s=w1 - w0)
+    ok, msg = stitch.verify(tmp, expected_s=w1 - w0, need_audio=bool(auds))
     print("检查结果：" + msg)
     if not ok:
         die("结果没通过检查，已保留在 %s，不会覆盖。可以加 --sections 改用分段下载。" % tmp)

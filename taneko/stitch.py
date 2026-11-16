@@ -209,8 +209,8 @@ def assemble(out, chunks, seed=None, workdir=None, log=print):
     return out
 
 
-def verify(path, expected_s=None, max_gap=0.1):
-    """检查成品：时长；视频和音频的时间戳是否连续（有没有跳帧、断档、没声音的空白）。返回 (ok, 说明)。"""
+def verify(path, expected_s=None, max_gap=0.1, need_audio=False):
+    """检查成品：时长；need_audio 时没有音频算失败；视频和音频的时间戳是否连续（有没有跳帧、断档、没声音的空白）。返回 (ok, 说明)。"""
     pk = video_packets(path)
     if not pk:
         return False, "没有视频包"
@@ -226,6 +226,7 @@ def verify(path, expected_s=None, max_gap=0.1):
     ap = audio_packets(path)
     if not ap:
         msg += "；没有音频"
+        ok = ok and not need_audio
     else:
         agaps = [(b[0] - a[0] - a[1], a[0]) for a, b in zip(ap, ap[1:]) if b[0] - a[0] - a[1] > max_gap]
         msg += "；音频从 %.1f 秒到 %.1f 秒" % (ap[0][0] - ts[0], ap[-1][0] + ap[-1][1] - ts[0])
