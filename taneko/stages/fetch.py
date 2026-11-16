@@ -110,6 +110,7 @@ class _Job:
 def _fetch_whole(j: _Job) -> None:
     """整条视频：yt-dlp 直接下，断了重跑会从 .part 接着下；下完检查视频和音频。"""
     print("下载整条视频，格式 %s（断了重跑同一条命令，会接着下）" % j.fmt, flush=True)
+    print("正在取视频地址（有时要等十几秒）……", flush=True)
     p = subprocess.Popen(j.ytdlp + ["-q", "--no-warnings", "--progress", "--newline"] + j.cookies + [
         "-f", j.fmt, "--merge-output-format", "mkv", "--remux-video", "mkv", "--no-simulate",
         "-O", "before_dl:SIZES %(requested_formats.:.filesize)j %(filesize,filesize_approx)j",
@@ -180,6 +181,7 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
     """取一次地址，读索引，下还没下完的格式（已下完的跳过），再切出这一段。
     HLS 格式按播放列表下（见 hls.py），其余按文件里的索引下（见 ranges.py）。"""
     todo, files, shift = [], [], 0.0
+    print("正在取视频地址、读索引（YouTube 有时要等十几秒）……", flush=True)
     fs = sorted(_formats(j), key=lambda f: f.get("vcodec") in (None, "none"))   # 视频在前
     a = w0      # 视频从 w0 之前的关键帧开始；音频也从那里下，开头才不会没声音
     for f in [f for f in fs if f["protocol"] != "https"]:
