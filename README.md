@@ -1,6 +1,6 @@
 # Taneko
 
-[![PyPI](https://img.shields.io/pypi/v/taneko)](https://pypi.org/project/taneko/)
+[![PyPI](https://img.shields.io/pypi/v/taneko?label=PyPI)](https://pypi.org/project/taneko/)
 [![test](https://github.com/coo1white/taneko/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/coo1white/taneko/actions/workflows/test.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/coo1white/taneko#快速上手)
