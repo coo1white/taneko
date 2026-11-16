@@ -1,5 +1,11 @@
 # Taneko
 
+[![test](https://github.com/coo1white/taneko/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/coo1white/taneko/actions/workflows/test.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#快速上手5-分钟)
+[![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 *Stay with me, even when the connection drops.*
 
 > 下载长视频里的一段。断了接着下，不用重来。
@@ -280,7 +286,9 @@ Taneko 只调用这些工具，不打包它们的代码。请自行安装，并�
 
 本项目没有 P2P，不会更快（价值在于不丢进度），不是 BitTorrent 的实现或客户端，与 BitTorrent, Inc. 无关。
 
-> Inspired by BitTorrent: split a big job into pieces, check each one, and redo only what is missing. Taneko (たね子) means "seed" with the old Showa-style "-ko" ending; the seed is the half-finished file a broken download leaves behind. Thanks to Bram Cohen and the BitTorrent community. No P2P; not a BitTorrent client; not affiliated with BitTorrent, Inc.
+> Inspired by BitTorrent: split a big job into small pieces, check each piece, and fetch only what is missing. Dedicated to the BT downloads we grew up with. Thanks to Bram Cohen and the BitTorrent community.
+>
+> Taneko has no P2P and is not faster; its value is that you never lose progress. It is not a BitTorrent implementation or client, and it is not affiliated with BitTorrent, Inc.
 
 ## 许可证
 
