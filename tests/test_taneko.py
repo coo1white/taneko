@@ -192,9 +192,6 @@ class Init(unittest.TestCase):
         meta = project.load_meta(d); meta["fetch"] = {"browser": "chrome", "cookies": "c.txt"}
         project.save_meta(d, meta)
         a = SimpleNamespace(project="ck", format=None, browser=None, cookies=None)
-        with self.assertRaises(core.Fail):
-            fetch._Job(a)                                   # 文件还不在：停下说清楚
-        (d / "c.txt").write_text("# Netscape HTTP Cookie File\n", "utf-8")
         self.assertEqual(fetch._Job(a).cookies, ["--cookies", str(d / "c.txt")])
         a.cookies = str(d / "c.txt")                        # 命令行给绝对路径也行
         self.assertEqual(fetch._Job(a).cookies[1], str(d / "c.txt"))

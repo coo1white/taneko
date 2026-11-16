@@ -100,9 +100,7 @@ class _Job:
         self.cookies = [] if browser == "none" else ["--cookies-from-browser", browser]
         cfile = a.cookies or fcfg.get("cookies")   # 没有浏览器的服务器：用从浏览器导出的 cookies.txt
         if cfile:
-            c = self.d / Path(cfile).expanduser()   # 相对路径从项目文件夹算
-            c.is_file() or die("找不到登录信息文件 %s。在自己电脑的浏览器里导出 cookies.txt（Netscape 格式），放到这里再重跑。" % c)
-            self.cookies = ["--cookies", str(c)]
+            self.cookies = ["--cookies", str(self.d / cfile)]   # 相对路径从项目文件夹算
 
     def piece(self, path: Path, ta: float, tb: float) -> int:
         cmd = self.ytdlp + ["-q", "--no-warnings"] + self.cookies + [
