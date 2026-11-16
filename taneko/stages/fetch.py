@@ -18,15 +18,8 @@ import time
 from pathlib import Path
 
 from .. import ranges, stitch
-from ..core import Stage, die, tool_cmd
+from ..core import Stage, die, span, tool_cmd
 from ..project import find_video, load_meta, project_dir
-
-
-def _t2s(x) -> float:
-    s = 0.0
-    for v in str(x).strip().split(":"):
-        s = s * 60 + float(v)
-    return s
 
 
 def _s2t(x) -> str:
@@ -51,7 +44,7 @@ def expected_duration(meta: dict):
     dl = (meta.get("section", {}) or {}).get("download")
     if not dl:
         return None
-    a, b = [_t2s(x) for x in dl.split("-")]
+    a, b = span(dl)
     return b - a
 
 
@@ -305,7 +298,7 @@ def cmd_fetch(a) -> None:
     j = _Job(a)
     if not j.sec.get("download"):
         return _fetch_whole(j)
-    w0, w1 = [_t2s(x) for x in j.sec["download"].split("-")]
+    w0, w1 = span(j.sec["download"])
     if not a.sections and not (j.parts / "seed.mkv").exists():
         if j.out.exists() and not a.force and stitch.duration_ok(video_duration(j.out) or 0.0, w1 - w0):
             return print("%s 已经存在且完整：%s" % (j.out.name, stitch.verify(j.out, expected_s=w1 - w0)[1]))

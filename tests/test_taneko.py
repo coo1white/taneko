@@ -333,6 +333,44 @@ class Flow(unittest.TestCase):
         self.assertFalse(flow.STAGES["check"].done(d, project.load_meta(d)))
 
 
+class Init(unittest.TestCase):
+    """taneko init（issue #5）：新手不用手写 meta.json。"""
+
+    def tearDown(self):
+        shutil.rmtree(core.PROJECTS / "init-group", ignore_errors=True)
+
+    def init(self, *argv):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["init", *argv])
+        return rc, out.getvalue()
+
+    def test_init_writes_a_runnable_project(self):
+        rc, out = self.init("init-group/g3", "https://www.youtube.com/watch?v=x", "--section", "4:13:00-4:14:00")
+        self.assertEqual(rc, core.EXIT_OK, out)
+        self.assertIn("run g3", out)
+        d = project.project_dir("g3")
+        meta = project.load_meta(d)
+        self.assertEqual(meta["section"], {"name": "g3", "download": "4:13:00-4:14:00"})
+        self.assertEqual(flow.plan(meta), ["fetch"])
+        self.assertEqual(fetch.expected_duration(meta), 60)
+        self.assertNotIn("fetch", meta)   # 浏览器用默认的 firefox
+
+    def test_init_refuses_bad_input(self):
+        self.assertEqual(self.init("init-group/g4", '"https://x.test/v"', "--browser", "none")[0], core.EXIT_OK)
+        meta = project.load_meta(project.project_dir("g4"))
+        self.assertEqual((meta["fetch"], meta["source_url"]), ({"browser": "none"}, "https://x.test/v"))   # 引号去掉了
+        for argv in (("init-group/g4", "https://x.test/v"),                       # 同名项目已经有了
+                     ("init-group/g5", "x.test/v"),                               # 不是网址
+                     ("init-group/g5", "https://x.test/v", "--section", "5:00-4:00"),
+                     ("init-group/g5", "https://x.test/v", "--section", "abc"),
+                     ("init-group/_g5", "https://x.test/v"), ("a/b/c/d", "https://x.test/v")):
+            rc, out = self.init(*argv)
+            self.assertEqual(rc, core.EXIT_FAIL, argv)
+            self.assertIn("错误：", out)
+        self.assertFalse((core.PROJECTS / "init-group" / "g5").exists())
+
+
 class Ranges(unittest.TestCase):
     """按索引下载（issue #8）：读 MP4 的 sidx 和 WebM 的 Cues，只取覆盖这段时间的字节，断了接着下。"""
 

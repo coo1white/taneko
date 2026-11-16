@@ -60,30 +60,23 @@ Windows 上如果 `python` 不能用，换成 `py`。
 
 ### 3. 建一个项目
 
-在 `taneko` 文件夹**旁边**建一个 `projects` 文件夹，每个视频一个子文件夹：
+```bash
+python taneko/taneko.py init game3 "https://www.youtube.com/watch?v=..." --section 4:13:00-5:08:00
+```
+
+- `game3`：项目名，也是下好的文件名（`game3.mkv`）。
+- 网址：前后加英文引号，免得 `&` 之类的符号被终端误读。
+- `--section`：开始-结束时间，可写 `4:13:00`、`13:00` 或 `780`（秒）。多短都行，比如 `4:13:00-4:14:00` 只下 1 分钟。不写就下整条视频。
+
+它会在 `taneko` 文件夹旁边建好项目：
 
 ```text
 你的文件夹/
 ├── taneko/              ← 第 2 步下载的代码
 └── projects/
     └── game3/
-        └── meta.json    ← 你写的设置
+        └── meta.json    ← 这个项目的设置
 ```
-
-`meta.json` 写这些：
-
-```json
-{
-  "source_url": "https://www.youtube.com/watch?v=...",
-  "section": { "download": "4:13:00-5:08:00", "name": "game3" },
-  "subtitle": { "method": "none" }
-}
-```
-
-- `source_url`：视频地址。
-- `download`：开始-结束时间，可写 `4:13:00`、`13:00` 或 `780`（秒）。多短都行，比如 `4:13:00-4:14:00` 只下 1 分钟。不写这一项就下整条视频。
-- `name`：下好的文件名，这里会得到 `game3.mkv`。
-- `"method": "none"`：只下视频，不做字幕。
 
 ### 4. 下载
 
@@ -111,7 +104,7 @@ python taneko/taneko.py run game3
 能。把它改名成 `name` 写的名字（例如 `game3.mkv`），放进项目文件夹，再跑 `run`。
 
 **不用 Firefox？**
-在 `meta.json` 里加 `"fetch": { "browser": "chrome" }`。写 `"none"` 表示不读浏览器的登录信息。
+建项目时加 `--browser chrome`。写 `--browser none` 表示不读浏览器的登录信息。
 
 **下载失败了？**
 看屏幕上“错误：”后面的说明，照着做，再跑一次。还不行就[提一个 issue](../../issues)，附上屏幕上的输出。
@@ -122,6 +115,7 @@ python taneko/taneko.py run game3
 <summary><b>所有命令</b></summary>
 
 ```bash
+python taneko/taneko.py init game3 网址 --section 开始-结束   # 新建项目
 python taneko/taneko.py run game3            # 跑完所有步骤，已完成的跳过
 python taneko/taneko.py run .                # 在项目文件夹里运行；也可以给完整路径
 python taneko/taneko.py status game3         # 一个项目的每一步
@@ -132,7 +126,20 @@ python taneko/taneko.py doctor               # 检查工具
 
 `fetch` 的常用选项：`--force` 重新下载，`--sections` 改用分段下载，`--keep` 保留中间文件。
 
-项目文件夹可以分组，最多 3 层，例如 `projects/lol-worlds/game3/`。
+项目可以分组，最多 3 层：`init lol-worlds/game3 网址` 会建在 `projects/lol-worlds/game3/`，之后用 `run game3` 就行。
+
+`init` 写出的 `meta.json` 也可以手动改：
+
+```json
+{
+  "source_url": "https://www.youtube.com/watch?v=...",
+  "section": { "name": "game3", "download": "4:13:00-5:08:00" },
+  "subtitle": { "method": "none" },
+  "fetch": { "browser": "chrome" }
+}
+```
+
+`"method": "none"` 表示只下视频，不做字幕。
 
 </details>
 

@@ -39,6 +39,17 @@ def die(msg: str) -> None:
     raise Fail(msg)
 
 
+def span(text: str) -> tuple:
+    """"4:13:00-5:08:00" → (开始秒, 结束秒)。每个时间可写 时:分:秒、分:秒 或 秒。"""
+    try:
+        a, b = [sum(float(v) * 60 ** i for i, v in enumerate(reversed(t.strip().split(":")))) for t in str(text).split("-")]
+    except ValueError:
+        die("时间范围 %s 看不懂。写成 开始-结束，例如 4:13:00-5:08:00、13:00-14:30 或 780-870" % text)
+    if b <= a:
+        die("时间范围 %s 的结束时间要晚于开始时间" % text)
+    return a, b
+
+
 @dataclass(frozen=True)
 class Stage:
     """流程里的一步。每个阶段只回答：叫什么、做完了吗、怎么做。没有 run 的是人工检查点。"""

@@ -15,9 +15,20 @@ def cmd_approve(a) -> None:
     print("已记录：%s 的“%s”检查点通过。" % (a.project, a.what))
 
 
+def cmd_init(a) -> None:
+    d = project.create(a.name, a.url, a.section, a.browser)
+    print("已建好项目：%s" % (d / "meta.json"))
+    print("下一步：python %s run %s" % (core.FRAMEWORK_DIR.name + "/taneko.py", d.name))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="taneko", description="下载 + 字幕：可续传、可恢复、带人工检查点")
     sp = ap.add_subparsers(dest="cmd", required=True)
+    p = sp.add_parser("init", help="新建项目：写好 meta.json（只下视频）")
+    p.add_argument("name", help="项目名，可带分组，例如 lol-worlds/game3"); p.add_argument("url", help="视频地址")
+    p.add_argument("--section", help="只下一段，例如 4:13:00-5:08:00；不写就下整条")
+    p.add_argument("--browser", help="读哪个浏览器的登录信息（默认 firefox，none 表示不读）")
+    p.set_defaults(fn=cmd_init)
     p = sp.add_parser("run", help="按计划跑完下载和字幕，已完成的自动跳过，遇到人工检查点停下")
     p.add_argument("project"); p.add_argument("--until", choices=list(flow.STAGES)); p.add_argument("--jobs", type=int, default=1)
     p.set_defaults(fn=lambda a: flow.run(a.project, a.until, a.jobs))
