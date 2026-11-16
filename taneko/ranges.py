@@ -7,6 +7,7 @@
 """
 import json
 import struct
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -18,12 +19,21 @@ class NoIndex(Exception):
     """这个格式不能按索引下载（不是错误，换分段下载即可）。"""
 
 
+class Refused(OSError):
+    """服务器拒绝了这个地址（HTTP 403）。YouTube 有时给出读不了的地址，换一个新地址通常就好。"""
+
+
 def getter(url: str, headers=None, timeout=60):
     """返回 get(a, b)：读字节 a..b（含两端）。"""
     def get(a, b):
         h = dict(headers or {}, Range="bytes=%d-%d" % (a, b))
-        with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
-            data = r.read()
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+                data = r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 403:
+                raise Refused("服务器拒绝了这个地址（HTTP 403）") from e
+            raise
         if len(data) != b - a + 1:
             raise OSError("服务器返回了 %d 字节，应为 %d 字节" % (len(data), b - a + 1))
         return data
@@ -135,6 +145,8 @@ def index(ext: str, get):
     """返回 (文件头长度, [(秒, 字节位置)])。"""
     try:
         head = get(0, HEAD - 1)
+    except Refused:
+        raise
     except OSError as e:
         raise NoIndex("读不到文件开头：%s" % e)
     try:
@@ -189,6 +201,8 @@ def _retry(get, a, b, retries):
     for n in range(retries):
         try:
             return get(a, b)
+        except Refused:
+            raise
         except OSError:
             if n == retries - 1:
                 raise

@@ -396,6 +396,39 @@ class Ranges(unittest.TestCase):
         self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
         self.assertEqual(calls[0], lo + 2 * 4096)                # 从断开的地方接着下，不从头来
 
+    def test_refused_is_not_retried_on_the_same_url(self):
+        calls = []
+
+        def refused(x, y):
+            calls.append(x)
+            raise ranges.Refused("403")
+        with self.assertRaises(ranges.Refused):
+            ranges.index("m4a", refused)
+        with self.assertRaises(ranges.Refused):
+            ranges.download(refused, self.dir / "refused.m4a", 10, 100, 200, 1000, log=lambda *_: None)
+        self.assertEqual(len(calls), 2)          # 每处只试一次，不在被拒的地址上空等重试
+
+    def test_refused_url_is_fetched_again(self):
+        tries = []
+
+        def once(j, w0, w1):
+            tries.append(1)
+            if len(tries) < 3:
+                raise ranges.Refused("403")
+        old = fetch._ranges_once
+        fetch._ranges_once = once
+        try:
+            with redirect_stdout(io.StringIO()) as out:
+                fetch._fetch_ranges(None, 0, 10)
+            self.assertEqual(len(tries), 3)
+            self.assertIn("重新取地址", out.getvalue())
+            tries.clear()
+            fetch._ranges_once = lambda j, a, b: (_ for _ in ()).throw(ranges.Refused("403"))
+            with redirect_stdout(io.StringIO()), self.assertRaises(ranges.NoIndex):
+                fetch._fetch_ranges(None, 0, 10)           # 三次都被拒：改用分段下载
+        finally:
+            fetch._ranges_once = old
+
     def test_cut_gives_a_clean_section(self):
         v, _ = self.fetch_range(self.v, "webm", 12, 31, "cv.webm")
         a, _ = self.fetch_range(self.a, "m4a", 12, 31, "ca.m4a")

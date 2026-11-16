@@ -143,25 +143,36 @@ def _formats(j: _Job) -> list:
     return fs
 
 
-def _fetch_ranges(j: _Job, w0: float, w1: float) -> None:
-    """按索引下载这一段（见 ranges.py）。格式没有索引时抛 NoIndex，由调用方改用分段下载。"""
-    got = []
+def _fetch_ranges(j: _Job, w0: float, w1: float, tries: int = 3) -> None:
+    """按索引下载这一段（见 ranges.py）。地址被拒（403）就重新取地址接着下；格式没有索引，
+    或换了 tries 次地址都被拒，抛 NoIndex，由调用方改用分段下载。"""
+    for n in range(1, tries + 1):
+        try:
+            return _ranges_once(j, w0, w1)
+        except ranges.Refused:
+            print("YouTube 拒绝了这个地址（403），重新取地址再试（第 %d/%d 次）。已下的部分不会丢。" % (n, tries), flush=True)
+    raise ranges.NoIndex("换了 %d 次地址都被拒绝（403）" % tries)
+
+
+def _ranges_once(j: _Job, w0: float, w1: float) -> None:
+    """取一次地址，读索引，下还没下完的格式（已下完的跳过），再切出这一段。"""
+    todo, files = [], []
     for f in _formats(j):
-        get = ranges.getter(f["url"], f.get("http_headers"))
-        init, frags = ranges.index(f["ext"], get)
-        _t0, lo, hi = ranges.pick(frags, f["filesize"], w0, w1)
-        got.append((f, get, init, lo, hi))
-    j.parts.mkdir(exist_ok=True)
-    files = []
-    for f, get, init, lo, hi in got:
         dst = j.parts / ("r_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
-        print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, f["filesize"] / 2**20))
-        if not dst.exists():
-            try:
-                ranges.download(get, dst, init, lo, hi, f["filesize"], log=lambda m: print(m, flush=True))
-            except OSError as e:
-                die("下载中断：%s。已下的部分在 %s，重跑同一条命令会接着下。" % (e, j.parts))
         files.append((dst, f.get("vcodec") not in (None, "none")))
+        if not dst.exists():
+            get = ranges.getter(f["url"], f.get("http_headers"))
+            init, frags = ranges.index(f["ext"], get)
+            todo.append((f, get, dst, init) + ranges.pick(frags, f["filesize"], w0, w1)[1:])
+    j.parts.mkdir(exist_ok=True)
+    for f, get, dst, init, lo, hi in todo:
+        print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, f["filesize"] / 2**20))
+        try:
+            ranges.download(get, dst, init, lo, hi, f["filesize"], log=lambda m: print(m, flush=True))
+        except ranges.Refused:
+            raise
+        except OSError as e:
+            die("下载中断：%s。已下的部分在 %s，重跑同一条命令会接着下。" % (e, j.parts))
     _cut(j, files, w0, w1)
 
 
@@ -276,7 +287,7 @@ def _finish(j: _Job, plan: list, seed: Path, use_seed: bool, expected: float) ->
         die("拼接结果没通过检查，已保留在 %s 和各分片，不会覆盖。可以加 --force 重新下载有问题的范围。" % tmp)
     shutil.move(str(tmp), str(j.out))
     if not j.a.keep:
-        for f in [p["file"] for p in plan] + list(j.parts.glob("_*")) + [seed]:
+        for f in [p["file"] for p in plan] + list(j.parts.glob("_*")) + list(j.parts.glob("r_*")) + [seed]:
             f.unlink(missing_ok=True)
         try:
             j.parts.rmdir()
