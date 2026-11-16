@@ -2,8 +2,6 @@
 
 *Stay with me, even when the connection drops.*
 
-[![GitHub stars](https://img.shields.io/github/stars/coo1white/taneko?style=social)](https://github.com/coo1white/taneko)
-
 > 下载长视频里的一段。断了接着下，不用重来。
 > Download part of a long video. If it stops, run it again and it picks up where it stopped.
 
