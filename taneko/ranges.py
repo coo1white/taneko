@@ -13,6 +13,7 @@ from pathlib import Path
 
 CHUNK = 10 * 1024 * 1024
 HEAD = 1024 * 1024
+REFUSED_WAITS = (2, 5, 10, 20)   # YouTube 新给的地址常常先回 403，等几秒就能读（2026-11-16 在 Windows 上实测）
 
 
 class NoIndex(Exception):
@@ -20,7 +21,7 @@ class NoIndex(Exception):
 
 
 class Refused(OSError):
-    """服务器拒绝了这个地址（HTTP 403）。YouTube 有时给出读不了的地址，换一个新地址通常就好。"""
+    """服务器拒绝了这个地址（HTTP 403），等过 REFUSED_WAITS 还是被拒。换一个新地址再试。"""
 
 
 def getter(url: str, headers=None, timeout=60):
@@ -144,7 +145,7 @@ def _cue_points(b, start, end, seg, scale):
 def index(ext: str, get):
     """返回 (文件头长度, [(秒, 字节位置)])。"""
     try:
-        head = get(0, HEAD - 1)
+        head = _retry(get, 0, HEAD - 1, 3)
     except Refused:
         raise
     except OSError as e:
@@ -197,13 +198,18 @@ def download(get, dst: Path, init: int, lo: int, hi: int, size: int, log=print, 
 
 
 def _retry(get, a, b, retries):
+    """网络错误重试 retries 次；403 按 REFUSED_WAITS 等一等再试，还被拒就抛 Refused。"""
     import time
-    for n in range(retries):
+    n, waits = 0, list(REFUSED_WAITS)
+    while True:
         try:
             return get(a, b)
         except Refused:
-            raise
-        except OSError:
-            if n == retries - 1:
+            if not waits:
                 raise
-            time.sleep(3 * (n + 1))
+            time.sleep(waits.pop(0))
+        except OSError:
+            n += 1
+            if n >= retries:
+                raise
+            time.sleep(3 * n)

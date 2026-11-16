@@ -150,7 +150,7 @@ def _fetch_ranges(j: _Job, w0: float, w1: float, tries: int = 3) -> None:
         try:
             return _ranges_once(j, w0, w1)
         except ranges.Refused:
-            print("YouTube 拒绝了这个地址（403），重新取地址再试（第 %d/%d 次）。已下的部分不会丢。" % (n, tries), flush=True)
+            print("YouTube 一直拒绝这个地址（403），重新取地址再试（第 %d/%d 次）。已下的部分不会丢。" % (n, tries), flush=True)
     raise ranges.NoIndex("换了 %d 次地址都被拒绝（403）" % tries)
 
 

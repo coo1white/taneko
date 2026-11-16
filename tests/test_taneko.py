@@ -396,17 +396,29 @@ class Ranges(unittest.TestCase):
         self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
         self.assertEqual(calls[0], lo + 2 * 4096)                # 从断开的地方接着下，不从头来
 
-    def test_refused_is_not_retried_on_the_same_url(self):
-        calls = []
+    def test_refused_url_is_waited_for(self):
+        """YouTube 新地址常常先回 403、等几秒就好：同一个地址等一等再试；一直被拒才抛 Refused。"""
+        data, calls = self.a.read_bytes(), []
 
-        def refused(x, y):
+        def late(x, y):                          # 前两次 403，之后正常
+            calls.append(x)
+            if len(calls) <= 2:
+                raise ranges.Refused("403")
+            return data[x:y + 1]
+
+        def never(x, y):
             calls.append(x)
             raise ranges.Refused("403")
-        with self.assertRaises(ranges.Refused):
-            ranges.index("m4a", refused)
-        with self.assertRaises(ranges.Refused):
-            ranges.download(refused, self.dir / "refused.m4a", 10, 100, 200, 1000, log=lambda *_: None)
-        self.assertEqual(len(calls), 2)          # 每处只试一次，不在被拒的地址上空等重试
+        old, ranges.REFUSED_WAITS = ranges.REFUSED_WAITS, (0, 0, 0)
+        try:
+            init, frags = ranges.index("m4a", late)
+            self.assertGreater(len(frags), 2)
+            calls.clear()
+            with self.assertRaises(ranges.Refused):
+                ranges.download(never, self.dir / "refused.m4a", 10, 100, 200, 1000, log=lambda *_: None)
+            self.assertEqual(len(calls), 4)      # 第一次 + 等了 3 次
+        finally:
+            ranges.REFUSED_WAITS = old
 
     def test_refused_url_is_fetched_again(self):
         tries = []
