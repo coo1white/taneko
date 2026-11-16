@@ -1,4 +1,4 @@
-import dataclasses, io, json, os, shutil, subprocess, sys, tempfile, unittest
+import io, json, os, shutil, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,12 +6,9 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
-from taneko import cli, core, doctor, flow, keys, project, srt  # noqa: E402
+from taneko import cli, core, doctor, flow, project  # noqa: E402
 from taneko import hls, ranges, stitch  # noqa: E402
-from taneko.stages import fetch, translate  # noqa: E402
-
-SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:00:06,500\nBaron down\n"
-
+from taneko.stages import fetch  # noqa: E402
 
 def make_project(name, meta):
     d = core.PROJECTS / name
@@ -25,19 +22,9 @@ def make_video(path, secs):
                     "-c:v", "libx264", str(path)], check=True)
 
 
-class Srt(unittest.TestCase):
-    def test_roundtrip(self):
-        cues = srt.parse_srt(SRT)
-        self.assertEqual(len(cues), 2)
-        self.assertAlmostEqual(cues[1]["end"], 6.5)
-        p = TMP / "x.srt"
-        srt.write_srt(cues, p)
-        self.assertEqual(srt.parse_srt(p.read_text("utf-8")), cues)
-
-
 class ExitCodes(unittest.TestCase):
     def test_codes_are_distinct_and_stable(self):
-        self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE, core.EXIT_NEEDS_HUMAN), (0, 1, 2, 10))
+        self.assertEqual((core.EXIT_OK, core.EXIT_FAIL, core.EXIT_USAGE), (0, 1, 2))
 
     def test_die_exits_with_fail(self):
         with self.assertRaises(core.Fail):
@@ -58,7 +45,6 @@ class ExitCodes(unittest.TestCase):
             self.assertEqual(cli.main([]), core.EXIT_OK)
         text = out.getvalue()
         self.assertIn("例子", text)
-        self.assertNotIn("translate ", text.split("例子")[0])   # 字幕命令不在常用命令里
 
     def test_empty_status_says_what_to_do(self):
         from unittest import mock
@@ -123,7 +109,6 @@ class Doctor(unittest.TestCase):
             os.environ["PATH"] = old
         self.assertEqual(rc, core.EXIT_FAIL)
         self.assertEqual(rows["ffmpeg"], (True, False, "没找到。装法：brew install ffmpeg"))
-        self.assertFalse(rows["Whisper 转写（字幕，实验性）"][0])  # 字幕工具是可选的
         self.assertIn("还缺：", buf.getvalue())
 
     def test_install_hints_per_platform(self):
@@ -131,136 +116,11 @@ class Doctor(unittest.TestCase):
         self.assertEqual(doctor._how("ffmpeg", "linux"), "sudo apt install ffmpeg")
 
 
-class ApiKey(unittest.TestCase):
-    def test_env_wins_and_status_never_prints_the_key(self):
-        name = core.load_config("translate")["key_env"]
-        old = os.environ.get(name)
-        os.environ[name] = "sk-test-SECRET-123456"
-        try:
-            self.assertEqual(keys.get_api_key(name), "sk-test-SECRET-123456")
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                rc = cli.main(["key", "status"])
-            self.assertEqual(rc, core.EXIT_OK)
-            self.assertNotIn("SECRET", buf.getvalue())      # 不显示内容
-            self.assertIn("21 个字符", buf.getvalue())       # 只显示长度
-        finally:
-            if old is None:
-                del os.environ[name]
-            else:
-                os.environ[name] = old
-
-    def test_status_without_key_returns_fail(self):
-        name = core.load_config("translate")["key_env"]
-        old = {k: os.environ.pop(k) for k in (name, "CUSTOM_API_KEY") if k in os.environ}
-        try:
-            if keys._win_env_get(name):
-                self.skipTest("这台机器的用户环境变量里已有密钥")
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(cli.main(["key", "status"]), core.EXIT_FAIL)
-        finally:
-            os.environ.update(old)
-
-
-class KeyCheck(unittest.TestCase):
-    """key check 用本机的假服务器测试：好密钥 200，坏密钥 401，额度满 429，连不上。"""
-
-    @classmethod
-    def setUpClass(cls):
-        import http.server, threading
-
-        class H(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                self.rfile.read(int(self.headers["Content-Length"]))
-                auth = self.headers.get("Authorization")
-                self.send_response({"Bearer good": 200, "Bearer busy": 429}.get(auth, 401))
-                self.end_headers()
-                self.wfile.write(b"{}")
-
-            def log_message(self, *a):
-                pass
-
-        for k in ("no_proxy", "NO_PROXY"):                   # 本机有代理时，别把假服务器的请求交给代理
-            os.environ[k] = ",".join(filter(None, [os.environ.get(k), "127.0.0.1"]))
-        cls.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
-        cls.cfg = {"server": "http://127.0.0.1:%d" % cls.srv.server_port, "endpoint": "/v1/chat/completions", "model": "m"}
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.srv.shutdown()
-
-    def run_check(self, key, cfg=None):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = keys.check(cfg or self.cfg, key, timeout=5)
-        self.assertNotIn(key, buf.getvalue())               # 从不显示密钥
-        return rc, buf.getvalue()
-
-    def test_good_bad_busy_and_offline(self):
-        self.assertEqual(self.run_check("good")[0], core.EXIT_OK)
-        rc, out = self.run_check("bad-SECRET")
-        self.assertEqual(rc, core.EXIT_FAIL)
-        self.assertIn("401", out)
-        self.assertIn("429", self.run_check("busy")[1])
-        rc, out = self.run_check("good", dict(self.cfg, server="http://127.0.0.1:1"))
-        self.assertEqual(rc, core.EXIT_FAIL)
-        self.assertIn("连不上", out)
-
-
-class Segments(unittest.TestCase):
-    def cues(self, n):
-        return [{"start": float(i), "end": i + 0.5, "text": "en%d" % i} for i in range(n)]
-
-    def test_resume_skips_finished_segments(self):
-        en, seg = self.cues(10), TMP / "seg1"
-        calls = []
-
-        def make(fail_on):
-            def run_one(src, out):
-                calls.append(src.name)
-                if src.name == fail_on:
-                    return False  # 模拟这一段卡住/失败
-                srt.write_srt([dict(c, text="zh" + c["text"][2:]) for c in srt.parse_srt(src.read_text("utf-8"))], out)
-                return True
-            return run_one
-
-        with redirect_stdout(io.StringIO()), self.assertRaises(core.Fail):
-            translate.translate_segments(en, seg, make("en_02.srt"), size=4)
-        self.assertEqual(calls, ["en_01.srt", "en_02.srt"])      # 第 2 段失败，停下
-        self.assertTrue((seg / "zh_01.srt").exists())             # 第 1 段已存盘
-        calls.clear()
-        with redirect_stdout(io.StringIO()):
-            zh = translate.translate_segments(en, seg, make(None), size=4)
-        self.assertEqual(calls, ["en_02.srt", "en_03.srt"])      # 重跑：跳过第 1 段
-        self.assertEqual([z["text"] for z in zh], ["zh%d" % i for i in range(10)])  # 顺序、条数完整
-
-    def test_tiny_last_segment_is_merged(self):
-        seen = []
-
-        def run_one(src, out):
-            seen.append(len(srt.parse_srt(src.read_text("utf-8"))))
-            srt.write_srt(srt.parse_srt(src.read_text("utf-8")), out)
-            return True
-
-        with redirect_stdout(io.StringIO()):
-            translate.translate_segments(self.cues(17), TMP / "seg2", run_one, size=8)
-        self.assertEqual(seen, [8, 9])  # 末段只有 1 条（不足四分之一段），并入前一段
-
-
 class Flow(unittest.TestCase):
     def meta(self, **kw):
-        m = {"source_url": "u", "video_glob": "*.mkv", "section": {"download": "0:00:00-0:00:10", "name": "g"},
-             "subtitle": {"source_lang": "en", "asr_language": "en", "method": "asr"}, "translate": {}}
+        m = {"source_url": "u", "video_glob": "*.mkv", "section": {"download": "0:00:00-0:00:10", "name": "g"}}
         m.update(kw)
         return m
-
-    def test_plan_zh_source_has_no_translation(self):
-        m = self.meta(subtitle={"source_lang": "zh", "asr_language": "zh", "method": "asr"})
-        self.assertEqual(flow.plan(m), ["fetch", "asr"])
-
-    def test_plan_method_none_is_download_only(self):
-        self.assertEqual(flow.plan({"subtitle": {"method": "none", "source_lang": "en"}}), ["fetch"])
 
     def test_status_json_for_scripts(self):
         make_project("js1", self.meta())
@@ -269,8 +129,8 @@ class Flow(unittest.TestCase):
             rc = cli.main(["status", "--json", "js1"])
         self.assertEqual(rc, core.EXIT_OK)
         (row,) = json.loads(buf.getvalue())["projects"]
-        self.assertEqual((row["project"], row["next"], row["needs_human"]), ("js1", "fetch", False))
-        self.assertEqual([s["state"] for s in row["steps"]][:2], ["next", "todo"])
+        self.assertEqual((row["project"], row["next"]), ("js1", "fetch"))
+        self.assertEqual([s["state"] for s in row["steps"]], ["next"])
         self.assertEqual(row["steps"][0]["name"], "fetch")
 
     def test_no_error_says_send_it_to_me(self):
@@ -286,68 +146,6 @@ class Flow(unittest.TestCase):
         self.assertTrue(flow.STAGES["fetch"].done(d, project.load_meta(d)))
         (d / "_parts").mkdir()
         self.assertFalse(flow.STAGES["fetch"].done(d, project.load_meta(d)))
-
-    def test_run_stops_at_gates_and_resumes(self):
-        d = make_project("p2", self.meta(translate={"corrections": {"Chovie": "Chovy"}}))
-        calls = []
-
-        def fake(step):
-            def f(a):
-                calls.append(step)
-                if step == "fetch":
-                    make_video(d / "g.mkv", 10)
-                elif step == "asr":
-                    (d / "en.srt").write_text(SRT, "utf-8")
-                elif step == "terms":
-                    (d / "terms.txt").write_text("2 Chovy\n", "utf-8")
-                elif step == "fix":
-                    shutil.copyfile(d / "en.srt", d / "en.srt.orig")
-                elif step == "translate":
-                    srt.write_srt([dict(c, text="中文") for c in srt.parse_srt(SRT)], d / "zh.srt")
-            return f
-
-        orig = dict(flow.STAGES)
-        flow.STAGES.update({k: dataclasses.replace(orig[k], run=fake(k))
-                            for k in ("fetch", "asr", "terms", "fix", "translate")})
-        try:
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                rc = cli.main(["run", "p2"])
-            self.assertEqual(rc, core.EXIT_NEEDS_HUMAN)  # 停在人工检查点：退出码 10
-            self.assertEqual(calls, ["fetch", "asr", "terms"])  # 在术语检查点停下
-            self.assertIn("approve p2 terms", buf.getvalue())
-            with redirect_stdout(io.StringIO()):
-                cli.main(["approve", "p2", "terms"])
-                cli.main(["run", "p2"])
-            self.assertEqual(calls, ["fetch", "asr", "terms", "fix", "translate"])  # check 是真实逻辑，不用假的
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                rc = cli.main(["run", "p2"])
-            self.assertEqual(rc, core.EXIT_NEEDS_HUMAN)  # 抽查检查点：也是 10
-            self.assertEqual(calls, ["fetch", "asr", "terms", "fix", "translate"])  # 重跑：已完成的全部跳过
-            self.assertIn("approve p2 spot", buf.getvalue())
-            with redirect_stdout(io.StringIO()):
-                cli.main(["approve", "p2", "spot"])
-                buf = io.StringIO()
-            with redirect_stdout(buf):
-                rc = cli.main(["run", "p2"])
-            self.assertEqual(rc, core.EXIT_OK)  # 全部完成：0
-            self.assertIn("全部完成", buf.getvalue())
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                cli.main(["status", "p2"])
-            self.assertNotIn("→", buf.getvalue())
-        finally:
-            flow.STAGES.update(orig)
-
-    def test_check_detects_timing_change(self):
-        d = make_project("p3", self.meta())
-        (d / "en.srt").write_text(SRT, "utf-8")
-        bad = srt.parse_srt(SRT)
-        bad[0]["start"] += 1
-        srt.write_srt([dict(c, text="中") for c in bad], d / "zh.srt")
-        self.assertFalse(flow.STAGES["check"].done(d, project.load_meta(d)))
-
 
 class Init(unittest.TestCase):
     """taneko init（issue #5）：新手不用手写 meta.json。"""
@@ -395,9 +193,7 @@ class Packaging(unittest.TestCase):
         root = Path(core.__file__).resolve().parent.parent
         conf = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
         pkgs = {".".join(f.parent.relative_to(root).parts) for f in (root / "taneko").rglob("__init__.py")}
-        self.assertEqual(set(conf["tool"]["setuptools"]["packages"]), pkgs | {"taneko.config"})   # config 只有数据文件
-        self.assertEqual(conf["tool"]["setuptools"]["package-data"], {"taneko.config": ["*.json"]})
-        self.assertTrue(list((root / "taneko" / "config").glob("*.json")))
+        self.assertEqual(set(conf["tool"]["setuptools"]["packages"]), pkgs)
         self.assertEqual(conf["project"]["scripts"]["taneko"], "taneko.cli:main")
         self.assertEqual(conf["project"]["requires-python"], ">=3.11")
         self.assertEqual(conf["project"]["dependencies"], ["yt-dlp[default]>=2026.10.26"])   # 唯一的依赖，只作为命令调用
@@ -737,10 +533,10 @@ class Seams(unittest.TestCase):
 
 
 class Layers(unittest.TestCase):
-    """依赖只往下走：cli → flow → stages → project / srt / keys / stitch → core。阶段之间互不引用。"""
-    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "hls": {"ranges"}, "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
-               "stages": {"core", "project", "srt", "keys", "stitch", "ranges", "hls"}, "flow": {"core", "project", "stages"},
-               "cli": {"core", "doctor", "flow", "keys", "project"}}
+    """依赖只往下走：cli → flow → stages → project / stitch / ranges / hls → core。阶段之间互不引用。"""
+    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "hls": {"ranges"}, "project": {"core"}, "doctor": {"core"},
+               "stages": {"core", "project", "stitch", "ranges", "hls"}, "flow": {"core", "project", "stages"},
+               "cli": {"core", "doctor", "flow", "project"}}
 
     def test_imports_only_go_down(self):
         import ast

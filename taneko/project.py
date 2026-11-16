@@ -41,7 +41,7 @@ def project_dir(ref: str) -> Path:
 
 
 def create(name: str, url: str, section=None, browser=None) -> Path:
-    """新建 projects/<name>/meta.json。name 可以带分组，例如 lol-worlds/game3。只下视频，不做字幕。"""
+    """新建 projects/<name>/meta.json。name 可以带分组，例如 lol-worlds/game3。"""
     parts = name.replace("\\", "/").strip("/").split("/")
     if len(parts) > DEPTH or any(not p or p in (".", "..") or p.startswith(("_", ".")) for p in parts):
         die("项目名 %s 不行：最多 %d 层，每层不能为空，也不能以 _ 或 . 开头" % (name, DEPTH))
@@ -54,7 +54,7 @@ def create(name: str, url: str, section=None, browser=None) -> Path:
     if same:
         die("已经有叫 %s 的项目：%s。换个名字，或者直接 run 它" % (parts[-1], same[0]))
     d = PROJECTS.joinpath(*parts)
-    meta = {"source_url": url, "section": {"name": parts[-1]}, "subtitle": {"method": "none"}}
+    meta = {"source_url": url, "section": {"name": parts[-1]}}
     if section:
         meta["section"]["download"] = section
     if browser:
@@ -76,12 +76,6 @@ def find_video(d: Path, meta: dict):
     files = [f for f in d.glob(meta.get("video_glob", "*.mkv")) if not f.name.endswith(".part")]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return files[0] if files else None
-
-
-def source_srt_name(meta: dict) -> str:
-    sub = meta.get("subtitle", {}) or {}
-    lang = sub.get("asr_language") or sub.get("source_lang") or "en"
-    return "zh.srt" if str(lang).startswith("zh") else "en.srt"
 
 
 def dirs() -> list:

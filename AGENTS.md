@@ -14,7 +14,7 @@ Read first:
 - Code goes to a branch first. Fast-forward `main` to it only when CI is green.
 - Open a pull request only for outside contributors, a review by another model, or a release record.
 - Commit messages: `area: what changed for the user`. Add `Closes #N` when a commit finishes an issue.
-- Code limits are in the ROADMAP decision record: 2,000 lines (hard cap 2,500), 400 per file, 80 per function, and the standard library only, except in `taneko/workers/`.
+- Code limits are in the ROADMAP decision record: target 1,500 lines (hard cap 2,000), 400 per file, 80 per function, and the standard library only.
 
 ## Issues
 

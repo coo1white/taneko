@@ -5,8 +5,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from pathlib import Path
-
 from . import core
 
 # 每个平台的装法：win32 / darwin / 其他（Linux）
@@ -46,16 +44,6 @@ def checks(platform: str = sys.platform) -> list:
     out.append((True, "yt-dlp", bool(v), v or "没找到。装法：%s" % _how("yt-dlp", platform)))
     out.append((False, "项目目录", core.PROJECTS.is_dir(), "%s%s" % (core.PROJECTS, "" if core.PROJECTS.is_dir() else
                 "，还没有：第一次 taneko init 时会自动建。想放别处，设环境变量 TANEKO_PROJECTS")))
-    try:
-        home = Path(core.load_config("asr").get("home", ""))
-    except core.Fail:
-        home = Path("")
-    whisper = any((home / "venv" / s / n).exists() for s, n in (("Scripts", "python.exe"), ("bin", "python")))
-    out.append((False, "Whisper 转写（字幕，实验性）", whisper, str(home) if whisper else
-                "没找到 venv（taneko/config/asr.json 的 home）。只下载视频不需要它"))
-    tool = core.VENDOR / "llm-subtrans"
-    out.append((False, "llm-subtrans 翻译（字幕，实验性）", tool.is_dir(), str(tool) if tool.is_dir() else
-                "没找到。只下载视频不需要它"))
     return out
 
 

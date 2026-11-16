@@ -1,5 +1,5 @@
-"""代码量上限（ROADMAP 决策记录 2026-11-15）：总行数 2,000（封顶 2,500），单个文件 400 行，单个函数 80 行，
-第三方依赖 0 个（taneko/workers/ 里的脚本在别的环境里跑，不算）。只用标准库。"""
+"""代码量上限（ROADMAP 决策记录 2026-11-16）：总行数目标 1,500（封顶 2,000），单个文件 400 行，单个函数 80 行。
+代码里只 import 标准库。"""
 import ast
 import sys
 import unittest
@@ -7,7 +7,7 @@ import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOFT, HARD, FILE_MAX, FUNC_MAX = 2000, 2500, 400, 80
+SOFT, HARD, FILE_MAX, FUNC_MAX = 1500, 2000, 400, 80
 
 
 def program_files(root=ROOT):
@@ -31,7 +31,7 @@ def measure(files, base=ROOT):
                 size = node.end_lineno - node.lineno + 1
                 if size > FUNC_MAX:
                     long_funcs.append("%s %s()：%d 行（上限 %d）" % (rel, node.name, size, FUNC_MAX))
-            if stdlib is None or "/workers/" in "/" + rel:
+            if stdlib is None:
                 continue
             names = []
             if isinstance(node, ast.Import):
@@ -53,7 +53,7 @@ class Size(unittest.TestCase):
         self.assertLessEqual(total, HARD, "程序代码 %d 行，超过封顶 %d 行" % (total, HARD))
         self.assertEqual(long_files, [], "文件太长")
         self.assertEqual(long_funcs, [], "函数太长，请拆成小步骤")
-        self.assertEqual(third, [], "只能用标准库（taneko/workers/ 除外）")
+        self.assertEqual(third, [], "只能用标准库")
 
     def test_the_check_bites(self):
         """临时造一个 2,600 行的文件，确认检查真的会报出来，并给出行数和上限。"""

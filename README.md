@@ -31,10 +31,11 @@
 
 - **适合**：只要长视频里的一段，比如 9 小时直播里的一局。
 - **不太需要**：只下整条视频。直接用 yt-dlp 就够了，Taneko 本来也是用它取视频地址。
+- **不做**：字幕。下完后可以用 [VideoLingo](https://github.com/Huanshere/VideoLingo) 或 [pyvideotrans](https://github.com/jianchang512/pyvideotrans)。
 
 ## 快速上手
 
-下面是最常见的用法：只下视频，不做字幕。共 3 步。
+下面是最常见的用法，共 3 步。
 
 ### 1. 安装
 
@@ -82,7 +83,7 @@ pipx install taneko
 taneko doctor
 ```
 
-缺什么，它会告诉你怎么装。Whisper 和 llm-subtrans 只有做字幕才要，可以不管。
+缺什么，它会告诉你怎么装。
 
 Taneko 默认读取 Firefox 的登录信息（cookies），能下更多视频，比如会员视频。不用 Firefox 也能下。
 
@@ -156,12 +157,9 @@ taneko doctor               # 检查工具
 {
   "source_url": "https://www.youtube.com/watch?v=...",
   "section": { "name": "game3", "download": "4:13:00-5:08:00" },
-  "subtitle": { "method": "none" },
   "fetch": { "browser": "chrome" }
 }
 ```
-
-`"method": "none"` 表示只下视频，不做字幕。
 
 </details>
 
@@ -192,71 +190,15 @@ YouTube 偶尔会对新地址返回 403，Taneko 会等几秒再试，再不行�
 </details>
 
 <details>
-<summary><b>字幕（实验性，暂停开发）</b></summary>
-
-字幕能用，但不保证质量。流程：
-
-`fetch → asr（或 subs）→ terms → ⏸术语校对 → fix → translate → check → ⏸抽查`
-
-本地 Whisper 转写，找出可能听错的专有名词，你校对，批量修正，按术语表翻译，检查，你抽查。停在 ⏸ 时，屏幕会告诉你看哪个文件、改哪里、下一条命令是什么。
-
-还要装：
-
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：单独的 venv，建议用 CUDA 显卡。在 `taneko/config/asr.json` 的 `home` 里写它的目录。
-- [llm-subtrans](https://github.com/machinewrapped/llm-subtrans)：翻译用，还要一个 OpenAI 兼容接口的密钥。
-
-`meta.json` 的写法：
-
-```json
-{
-  "source_url": "https://www.youtube.com/watch?v=...",
-  "section": { "download": "4:13:00-5:08:00", "name": "game3" },
-  "subtitle": { "method": "asr", "source_lang": "en" },
-  "translate": { "domain": "英雄联盟电竞", "names": [], "corrections": {} }
-}
-```
-
-- `method`：`asr` 是本地转写；`subs` 是抓视频自带的字幕。
-- `source_lang` 写 `zh` 时，只转写，不翻译。
-
-检查点命令：
-
-```bash
-taneko approve game3 terms   # 术语校对完
-taneko approve game3 spot    # 抽查完
-taneko translate game3 --test  # 先试翻译风格
-```
-
-单个步骤也能单独跑：`fetch / subs / asr / terms / fix / translate / check`。
-
-**API 密钥**只放在环境变量 `OPENCODE_API_KEY`，不写进项目文件：
-
-```bash
-taneko key set      # 保存（输入时不显示）
-taneko key status   # 只显示有没有、多长、从哪来
-taneko key check    # 问一次服务器密钥是否有效（用 1 个 token）
-taneko key clear    # 删除
-```
-
-- Windows：`key set` 存进用户环境变量。它是明文，你账户下的程序都读得到。
-- macOS / Linux：`key set` 不保存，请自己在 shell 配置里 `export OPENCODE_API_KEY=...`。
-- 不保存也行：在终端里翻译时会问一次。脚本或 agent 运行时不问，直接报错退出。
-
-翻译步骤会给你本地的 llm-subtrans 打一个小补丁（支持额外的请求头和参数）。只改你电脑上那份，不分发它的代码。
-
-</details>
-
-<details>
 <summary><b>退出码（给脚本和 agent）</b></summary>
 
 | 退出码 | 含义 | 下一步 |
 |---|---|---|
-| `0` | 成功；`run` 表示全部完成 | 无 |
+| `0` | 成功 | 无 |
 | `1` | 出错（输出里有“错误：”） | 看报错，修好再跑 |
 | `2` | 命令参数不对 | 看 `--help` |
-| `10` | `run` 停在人工检查点（不是失败） | 处理后 `approve`，再 `run` |
 
-`status --json` 给出每个项目的 `next`（下一步）、`needs_human`（是否在等人）和每一步的 `state`（`done` / `skip` / `next` / `todo`）。
+`status --json` 给出每个项目的 `next`（下一步）和每一步的 `state`（`done` / `next` / `todo`）。
 
 </details>
 
@@ -264,9 +206,7 @@ taneko key clear    # 删除
 <summary><b>配置和目录</b></summary>
 
 - 从源码运行时，项目默认在代码文件夹旁边的 `projects/`。用 pip 安装后，默认在用户目录下的 `taneko/projects/`（Windows 是 `C:\Users\你的用户名\taneko\projects`）。`doctor` 会显示实际位置。
-- 翻译工具默认在项目目录旁边的 `workflow/vendor/`。
-- 用环境变量改位置：`TANEKO_ROOT`、`TANEKO_PROJECTS`、`TANEKO_CONFIG`、`TANEKO_VENDOR`。
-- 转写设置在 `taneko/config/asr.json`；翻译设置（接口、模型、分段大小）在 `taneko/config/translate.json`。
+- 用环境变量改位置：`TANEKO_ROOT`、`TANEKO_PROJECTS`。
 
 </details>
 
@@ -275,18 +215,13 @@ taneko key clear    # 删除
 
 | 在真实环境测过 | 还没测过 |
 |---|---|
-| 分段下载、半截文件对齐、拼接：一局 55 分钟的 1440p60 视频，复用 41 分钟的旧文件，对齐误差 0.00，视频无断档。2026-11-16 前拼的文件接缝处有 0.5～3.5 秒没声音，已修复（issue [#1](https://github.com/coo1white/taneko/issues/1)） | 转写、术语校对、翻译（实验性，暂停开发） |
+| 分段下载、半截文件对齐、拼接：一局 55 分钟的 1440p60 视频，复用 41 分钟的旧文件，对齐误差 0.00，视频无断档。2026-11-16 前拼的文件接缝处有 0.5～3.5 秒没声音，已修复（issue #1） | |
 | 按索引下载一段（issue [#8](https://github.com/coo1white/taneko/issues/8)）：YouTube 1440p60，中途强行停掉再跑，从已下的 160 MiB 接着下；画面和整条下载逐字节相同，音画差 5～21 毫秒；约 8 MiB/s（分段下载约 2 倍实时） | |
 | B 站按索引下载一段（2026-11-16，Windows）：1080p，1 分钟和 3 分钟两段都有声音、时长对。从海外下很慢，约 0.1 MiB/s | B 站中途停掉后接着下（机制和 YouTube 相同，有自动测试，但 B 站上还没在下到一半时停过） |
 | X 按播放列表下载一段（2026-11-16，Windows）：1080p 的 2 分钟，下到 11 / 41 片时强行停掉，重跑只下剩下的分片；成品 120 秒，有声音 | 其他用 HLS 的网站（如 Twitch 回放） |
 | Windows 上按索引下载：用 Firefox 登录信息，格式 308+140 跑了 3 次都成功，每次约 50 秒（分段下载 176 秒）；默认格式（AV1 + Opus）照快速上手走了一遍 | macOS、Linux 上的真实下载（只有自动测试） |
 | 多片同时下载（`--jobs 2`）：同一场比赛的另外 4 段 | |
-| 流程、人工检查点、退出码、分段翻译：有自动测试 | |
-
-已知问题：
-
-- 在新电脑上安装还不方便：issue [#5](https://github.com/coo1white/taneko/issues/5)。
-- 字幕的已知问题随字幕一起暂停，见 [ROADMAP.md](https://github.com/coo1white/taneko/blob/main/ROADMAP.md) 的“暂停”一节。
+| 流程、退出码：有自动测试 | |
 
 全部问题见 [Issues](https://github.com/coo1white/taneko/issues)，计划见 [ROADMAP.md](https://github.com/coo1white/taneko/blob/main/ROADMAP.md)，架构见 [ARCHITECTURE.md](https://github.com/coo1white/taneko/blob/main/ARCHITECTURE.md)。
 
@@ -301,9 +236,7 @@ taneko key clear    # 删除
 | 下载 | yt-dlp（Unlicense）+ deno + 浏览器登录信息 | 取视频地址，子进程调用 |
 | 按索引下载 | HTTP Range 请求，读 MP4 `sidx` 和 WebM Cues；HLS 读 `m3u8` 播放列表（都是标准库自己写） | 只下需要的字节或分片，断了接着下 |
 | 媒体处理 | FFmpeg / ffprobe（LGPL 2.1+，视构建方式可能为 GPL） | 无损截取、拼接、检查，子进程调用 |
-| 语音识别 | faster-whisper + CTranslate2，large-v3，CUDA，失败时退回 CPU | 本地转写 |
-| 翻译 | llm-subtrans + OpenAI 兼容接口（只测过 OpenCode） | 按术语表翻译；每 200 条存一次，中断后只补没译完的 |
-| 状态 | 每个项目一个 `meta.json`；`taneko/config/*.json` | 项目设置、术语表、检查点记录 |
+| 状态 | 每个项目一个 `meta.json` | 来源、要下的那一段、下载设置 |
 | 质量 | `unittest`、Mermaid、Git | 测试、架构图、版本管理 |
 
 Taneko 只调用这些工具，不打包它们的代码。请自行安装，并遵守各自的许可证。
