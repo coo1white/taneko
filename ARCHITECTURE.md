@@ -23,7 +23,7 @@
 cli          命令行：run / status / approve / key，加上每个阶段的单独命令
  └ flow      排顺序、跳过做完的、在人工检查点停下；不知道任何阶段的内部
     └ stages fetch · asr · subs · terms · fix · translate · check · gates
-       └ project · srt · keys · stitch
+       └ project · srt · keys · stitch · ranges
           └ core   路径、退出码、错误、Stage 约定、外部工具
 workers/     在 taneko 之外的环境里运行的脚本（如 Whisper 的 venv），可以用第三方包
 ```
@@ -81,7 +81,9 @@ zh_raw.srt       合并后的译文；zh.srt 是最终的中文字幕（时间�
 | check | 中英条数、时间轴一一对应，字数不超读速 |
 | ⏸ 抽查 | `meta.review.spot` 为真 |
 
-## 6. fetch：分片下载与续传
+## 6. fetch：按索引下载、分片下载与续传
+
+只下一段时，先按索引下载（`ranges.py`）：用 yt-dlp 取格式的地址，读 MP4 的 `sidx` 或 WebM 的 Cues，算出这段时间的字节范围，用 HTTP Range 每次 10 MiB 顺序下到 `_parts/*.part`，旁边的 `.json` 记着范围，重跑从已下的字节接着下。下完用 ffmpeg 不重新编码地切到这一段（视频从起点前的关键帧开始，音频从起点开始），`verify` 通过才替换成品。格式没有索引、不是单个文件，或加了 `--sections`，才走下面的分片下载。
 
 ```mermaid
 flowchart TD

@@ -1,12 +1,13 @@
 import dataclasses, io, json, os, shutil, subprocess, sys, tempfile, unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TMP = Path(tempfile.mkdtemp())
 os.environ["TANEKO_ROOT"] = str(TMP)
 from taneko import cli, core, doctor, flow, keys, project, srt  # noqa: E402
-from taneko import stitch  # noqa: E402
+from taneko import ranges, stitch  # noqa: E402
 from taneko.stages import fetch, translate  # noqa: E402
 
 SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello Chovy\n\n2\n00:00:04,000 --> 00:00:06,500\nBaron down\n"
@@ -332,6 +333,83 @@ class Flow(unittest.TestCase):
         self.assertFalse(flow.STAGES["check"].done(d, project.load_meta(d)))
 
 
+class Ranges(unittest.TestCase):
+    """按索引下载（issue #8）：读 MP4 的 sidx 和 WebM 的 Cues，只取覆盖这段时间的字节，断了接着下。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = TMP / "ranges"
+        cls.dir.mkdir()
+        cls.a, cls.v, cls.plain = cls.dir / "a.m4a", cls.dir / "v.webm", cls.dir / "plain.m4a"
+        ff = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i"]
+        subprocess.run(ff + ["sine=frequency=440:duration=45", "-c:a", "aac", "-f", "mp4", "-movflags", "+dash+global_sidx",
+                             "-frag_duration", "2000000", str(cls.a)], check=True)
+        subprocess.run(ff + ["mandelbrot=size=64x64:rate=10", "-t", "45", "-c:v", "libvpx", "-g", "25", "-keyint_min", "25",
+                             "-b:v", "200k", "-cues_to_front", "1", str(cls.v)], check=True)
+        subprocess.run(ff + ["sine=duration=10", "-c:a", "aac", str(cls.plain)], check=True)
+
+    @staticmethod
+    def getter(path, fail_after=None):
+        data, calls = path.read_bytes(), [0]
+
+        def get(a, b):
+            calls[0] += 1
+            if fail_after is not None and calls[0] > fail_after:
+                raise OSError("network down")
+            return data[a:b + 1]
+        return data, get
+
+    def fetch_range(self, src, ext, a, b, name):
+        data, get = self.getter(src)
+        init, frags = ranges.index(ext, get)
+        t0, lo, hi = ranges.pick(frags, len(data), a, b)
+        out = self.dir / name
+        ranges.download(get, out, init, lo, hi, len(data), log=lambda *_: None)
+        return out, t0
+
+    def test_both_indexes_cover_the_range(self):
+        for src, ext, name in ((self.a, "m4a", "ra.m4a"), (self.v, "webm", "rv.webm")):
+            out, t0 = self.fetch_range(src, ext, 10, 20, name)
+            pk = stitch.video_packets(out) or stitch.audio_packets(out)
+            self.assertLessEqual(pk[0][0], 10, name)
+            self.assertGreaterEqual(pk[-1][0], 19.5, name)
+            self.assertLess(out.stat().st_size, src.stat().st_size * 0.6, name)   # 只下了一部分
+
+    def test_no_index_means_fallback(self):
+        _, get = self.getter(self.plain)
+        with self.assertRaises(ranges.NoIndex):
+            ranges.index("m4a", get)
+
+    def test_resume_after_a_break(self):
+        data, get = self.getter(self.a)
+        init, frags = ranges.index("m4a", get)
+        _, lo, hi = ranges.pick(frags, len(data), 10, 30)
+        out = self.dir / "resume.m4a"
+        _, broken = self.getter(self.a, fail_after=3)
+        with self.assertRaises(OSError):
+            ranges.download(broken, out, init, lo, hi, len(data), log=lambda *_: None, chunk=4096, retries=1)
+        part = out.with_name(out.name + ".part")
+        self.assertEqual(part.stat().st_size, init + 2 * 4096)   # 文件头 + 两块，已下的没有丢
+        calls = []
+        ranges.download(lambda x, y: calls.append(x) or data[x:y + 1], out, init, lo, hi, len(data),
+                        log=lambda *_: None, chunk=4096)
+        self.assertEqual(out.read_bytes(), data[:init] + data[lo:hi + 1])
+        self.assertEqual(calls[0], lo + 2 * 4096)                # 从断开的地方接着下，不从头来
+
+    def test_cut_gives_a_clean_section(self):
+        v, _ = self.fetch_range(self.v, "webm", 12, 31, "cv.webm")
+        a, _ = self.fetch_range(self.a, "m4a", 12, 31, "ca.m4a")
+        parts = self.dir / "cut"
+        parts.mkdir()
+        j = SimpleNamespace(parts=parts, out=self.dir / "cut.mkv", a=SimpleNamespace(keep=True))
+        with redirect_stdout(io.StringIO()):
+            fetch._cut(j, [(v, True), (a, False)], 12, 31)
+        ok, msg = stitch.verify(j.out, expected_s=19)
+        self.assertTrue(ok, msg)
+        ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
+        self.assertAlmostEqual(ap[0][0] - vp[0][0], 12 - 10, delta=0.05)   # 视频从 10 秒的关键帧开始，音频从 12 秒开始
+
+
 class Seams(unittest.TestCase):
     """像 yt-dlp 截片段那样造分片：视频从起点前的关键帧开始，音频从起点开始。拼起来后音频不能有空白。"""
 
@@ -410,8 +488,8 @@ class Seams(unittest.TestCase):
 
 class Layers(unittest.TestCase):
     """依赖只往下走：cli → flow → stages → project / srt / keys / stitch → core。阶段之间互不引用。"""
-    ALLOWED = {"core": set(), "stitch": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
-               "stages": {"core", "project", "srt", "keys", "stitch"}, "flow": {"core", "project", "stages"},
+    ALLOWED = {"core": set(), "stitch": set(), "ranges": set(), "srt": {"core"}, "project": {"core"}, "keys": {"core"}, "doctor": {"core"},
+               "stages": {"core", "project", "srt", "keys", "stitch", "ranges"}, "flow": {"core", "project", "stages"},
                "cli": {"core", "doctor", "flow", "keys", "project"}}
 
     def test_imports_only_go_down(self):

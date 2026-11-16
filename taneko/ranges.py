@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""按索引下载一段：读文件自带的索引（MP4 的 sidx、WebM 的 Cues），算出这段时间在文件里的字节范围，
+只下这些字节。用的是普通 HTTP Range 请求，按 10 MiB 一块顺序下，断了从已下的字节接着下。
+
+下来的文件 = 文件头（init）+ 覆盖这段时间的片段，ffmpeg 能直接读；起点是这段之前最近的片段边界。
+没有索引的格式（HLS、直播等）抛 NoIndex，调用方改用分段下载。只用标准库，不引用 taneko 的其他模块。
+"""
+import json
+import struct
+import urllib.request
+from pathlib import Path
+
+CHUNK = 10 * 1024 * 1024
+HEAD = 1024 * 1024
+
+
+class NoIndex(Exception):
+    """这个格式不能按索引下载（不是错误，换分段下载即可）。"""
+
+
+def getter(url: str, headers=None, timeout=60):
+    """返回 get(a, b)：读字节 a..b（含两端）。"""
+    def get(a, b):
+        h = dict(headers or {}, Range="bytes=%d-%d" % (a, b))
+        with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+            data = r.read()
+        if len(data) != b - a + 1:
+            raise OSError("服务器返回了 %d 字节，应为 %d 字节" % (len(data), b - a + 1))
+        return data
+    return get
+
+
+# ---------- MP4：ftyp + moov 是文件头，sidx 列出每个片段的字节数和时长 ----------
+def mp4_index(head: bytes):
+    pos, init_end = 0, None
+    while pos + 8 <= len(head):
+        size, kind = struct.unpack(">I4s", head[pos:pos + 8])
+        if size < 8:
+            break
+        if kind == b"moov":
+            init_end = pos + size
+        elif kind == b"sidx" and init_end:
+            return init_end, _sidx(head[pos:pos + size], pos + size)
+        pos += size
+    raise NoIndex("MP4 文件开头没有 sidx 索引")
+
+
+def _sidx(b: bytes, after: int):
+    ver, ts = b[8], struct.unpack(">I", b[16:20])[0]
+    if ver == 0:
+        ept, first = struct.unpack(">II", b[20:28]); q = 28
+    else:
+        ept, first = struct.unpack(">QQ", b[20:36]); q = 36
+    count = struct.unpack(">H", b[q + 2:q + 4])[0]
+    q += 4
+    off, t, out = after + first, ept, []
+    for _ in range(count):
+        ref, dur, _sap = struct.unpack(">III", b[q:q + 12]); q += 12
+        if ref >> 31:
+            raise NoIndex("sidx 是多级索引，暂不支持")
+        out.append((t / ts, off))
+        off += ref & 0x7FFFFFFF; t += dur
+    return out
+
+
+# ---------- WebM（EBML）：Cues 列出每个关键帧所在 Cluster 的时间和位置 ----------
+def _vint(b, i, marker=False):
+    first, n = b[i], 1
+    while n <= 8 and not first & (0x80 >> (n - 1)):
+        n += 1
+    if n > 8:
+        raise NoIndex("WebM 头部格式不对")
+    v = first if marker else first & (0xFF >> n)
+    for k in range(1, n):
+        v = (v << 8) | b[i + k]
+    if not marker and v == (1 << (7 * n)) - 1:
+        raise NoIndex("WebM 元素长度未知（像直播流）")
+    return v, i + n
+
+
+def _children(b, i, end):
+    while i < end:
+        eid, j = _vint(b, i, True)
+        size, k = _vint(b, j)
+        yield eid, k, size
+        i = k + size
+
+
+def _uint(b, i, n):
+    return int.from_bytes(b[i:i + n], "big")
+
+
+def webm_index(head: bytes, more):
+    """more(a, b) 用来补读 Cues 超出 head 的部分。返回 (文件头长度, [(秒, 字节位置)])。"""
+    _, j = _vint(head, 0, True); s, k = _vint(head, j)
+    _, j = _vint(head, k + s, True); _, seg = _vint(head, j)       # Segment 内容的起点
+    scale, cues, i = 1000000, None, seg
+    while i < len(head) - 12:
+        eid, k = _vint(head, i, True); size, d = _vint(head, k)
+        if eid == 0x1549A966:                                        # Info：TimecodeScale
+            for e, p, n in _children(head, d, d + size):
+                if e == 0x2AD7B1:
+                    scale = _uint(head, p, n)
+        elif eid == 0x1C53BB6B:                                      # Cues
+            cues = (d, size)
+            if d + size + 16 > len(head):
+                head += more(len(head), d + size + 15)
+        elif eid == 0x1F43B675:                                      # 第一个 Cluster：文件头到这里为止
+            if not cues:
+                break
+            return i, _cue_points(head, cues[0], cues[0] + cues[1], seg, scale)
+        i = d + size
+    raise NoIndex("WebM 文件开头没有 Cues 索引")
+
+
+def _cue_points(b, start, end, seg, scale):
+    out = []
+    for e, p, n in _children(b, start, end):
+        if e != 0xBB:                                                # CuePoint
+            continue
+        t = pos = None
+        for e2, p2, n2 in _children(b, p, p + n):
+            if e2 == 0xB3:
+                t = _uint(b, p2, n2)
+            elif e2 == 0xB7:
+                for e3, p3, n3 in _children(b, p2, p2 + n2):
+                    if e3 == 0xF1:
+                        pos = _uint(b, p3, n3)
+        if t is not None and pos is not None and (not out or seg + pos > out[-1][1]):
+            out.append((t * scale / 1e9, seg + pos))
+    return out
+
+
+def index(ext: str, get):
+    """返回 (文件头长度, [(秒, 字节位置)])。"""
+    try:
+        head = get(0, HEAD - 1)
+    except OSError as e:
+        raise NoIndex("读不到文件开头：%s" % e)
+    try:
+        init, frags = mp4_index(head) if ext in ("m4a", "mp4") else webm_index(head, get) if ext == "webm" else (0, [])
+    except (struct.error, IndexError) as e:
+        raise NoIndex("索引读不懂：%s" % e)
+    if len(frags) < 2:
+        raise NoIndex("%s 格式没有可用的索引" % ext)
+    return init, frags
+
+
+def pick(frags, size: int, a: float, b: float):
+    """覆盖 [a, b] 的字节范围：(起点秒, 第一个字节, 最后一个字节)。"""
+    lo = max([x for x, f in enumerate(frags) if f[0] <= a] or [0])
+    after = [x for x, f in enumerate(frags) if f[0] >= b]
+    hi = frags[after[0]][1] - 1 if after else size - 1
+    return frags[lo][0], frags[lo][1], hi
+
+
+def download(get, dst: Path, init: int, lo: int, hi: int, size: int, log=print, chunk=CHUNK, retries=3):
+    """下到 dst.part；旁边的 .json 记着范围，范围和文件大小没变就从已下的字节接着下。完成后改名为 dst。"""
+    part, state = dst.with_name(dst.name + ".part"), dst.with_name(dst.name + ".json")
+    want = {"size": size, "init": init, "lo": lo, "hi": hi}
+    try:
+        same = json.loads(state.read_text("utf-8")) == want
+    except (OSError, ValueError):
+        same = False
+    if not same:
+        part.unlink(missing_ok=True)
+        state.write_text(json.dumps(want), "utf-8")
+    total = init + hi - lo + 1
+    have = part.stat().st_size if part.exists() else 0
+    if have > total:
+        part.unlink(); have = 0
+    if have:
+        log("  接着上次下：已有 %.1f / %.1f MiB" % (have / 2**20, total / 2**20))
+    with open(part, "ab") as f:
+        step = max(total // 10, 1)
+        while have < total:
+            a = have if have < init else lo + have - init
+            b = min(a + chunk - 1, init - 1 if have < init else hi)
+            f.write(_retry(get, a, b, retries)); f.flush()
+            if (have + b - a + 1) // step > have // step:
+                log("  %3d%%  %.1f / %.1f MiB" % ((have + b - a + 1) * 100 // total, (have + b - a + 1) / 2**20, total / 2**20))
+            have += b - a + 1
+    part.replace(dst)
+    state.unlink(missing_ok=True)
+
+
+def _retry(get, a, b, retries):
+    import time
+    for n in range(retries):
+        try:
+            return get(a, b)
+        except OSError:
+            if n == retries - 1:
+                raise
+            time.sleep(3 * (n + 1))

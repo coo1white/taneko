@@ -2,19 +2,22 @@
 """fetch：可续传的下载。
 
 - 整条视频（meta.json 没有 section.download）：交给 yt-dlp 直接下整个文件，它自己会续传，不切片、不拼接。
-- 一段（section.download，如 "4:13:00-5:08:00"）：yt-dlp 截取片段靠 ffmpeg，断了不能续传，所以像种子一样按“片”管理：
+- 一段（section.download，如 "4:13:00-5:08:00"）：先试按索引下载（ranges.py）：读文件自带的索引，只下这段的字节，
+  速度和整条下载一样，断了接着下；下完无损切到这段并检查。格式没有索引（HLS、直播等）或加了 --sections 时，改用分段下载。
+- 分段下载：yt-dlp 截取片段靠 ffmpeg，很慢（约 2 倍实时），断了不能续传，所以像种子一样按“片”管理：
   把范围切成 chunk 秒的小片（默认 600 秒），每片带 -copyts 保留绝对时间戳单独下载，下完立刻校验视频和音频；
   重跑只补缺的片；全部下完后按关键帧无损拼接成 <name>.mkv，并检查视频和音频有没有断档。
   旧的“半截文件”（<name>.mkv 比应有的短）会被当作种子接着用，不用从头来。
 “下载完整”只有一个标准：stitch.duration_ok。
 """
+import json
 import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
 
-from .. import stitch
+from .. import ranges, stitch
 from ..core import Stage, die, tool_cmd
 from ..project import find_video, load_meta, project_dir
 
@@ -126,6 +129,69 @@ def _fetch_whole(j: _Job) -> None:
     print("完成：%s" % j.out)
 
 
+def _formats(j: _Job) -> list:
+    """yt-dlp 选中的格式（视频+音频时是两个）。不是能按字节读的单个文件就抛 NoIndex。"""
+    r = subprocess.run(j.ytdlp + ["-q", "--no-warnings", "-j"] + j.cookies + ["-f", j.fmt, j.url],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not r.stdout.strip():
+        raise ranges.NoIndex("yt-dlp 读不到格式信息（退出码 %s）" % r.returncode)
+    info = json.loads(r.stdout.strip().splitlines()[-1])
+    fs = info.get("requested_formats") or [info]
+    for f in fs:
+        if f.get("protocol") != "https" or not f.get("filesize") or not f.get("url"):
+            raise ranges.NoIndex("格式 %s 不是能按字节读的单个文件" % f.get("format_id"))
+    return fs
+
+
+def _fetch_ranges(j: _Job, w0: float, w1: float) -> None:
+    """按索引下载这一段（见 ranges.py）。格式没有索引时抛 NoIndex，由调用方改用分段下载。"""
+    got = []
+    for f in _formats(j):
+        get = ranges.getter(f["url"], f.get("http_headers"))
+        init, frags = ranges.index(f["ext"], get)
+        _t0, lo, hi = ranges.pick(frags, f["filesize"], w0, w1)
+        got.append((f, get, init, lo, hi))
+    j.parts.mkdir(exist_ok=True)
+    files = []
+    for f, get, init, lo, hi in got:
+        dst = j.parts / ("r_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
+        print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, f["filesize"] / 2**20))
+        if not dst.exists():
+            try:
+                ranges.download(get, dst, init, lo, hi, f["filesize"], log=lambda m: print(m, flush=True))
+            except OSError as e:
+                die("下载中断：%s。已下的部分在 %s，重跑同一条命令会接着下。" % (e, j.parts))
+        files.append((dst, f.get("vcodec") not in (None, "none")))
+    _cut(j, files, w0, w1)
+
+
+def _cut(j: _Job, files: list, w0: float, w1: float) -> None:
+    """视频从 w0 之前最近的关键帧开始，音频从 w0 开始，都到 w1；不重新编码。检查通过才替换成品。"""
+    vids = [p for p, v in files if v] or [files[0][0]]
+    auds = [p for p, v in files if not v and p not in vids]
+    pk = stitch.video_packets(vids[0]) or stitch.audio_packets(vids[0])
+    if not pk:
+        die("%s 读不出内容。删掉 %s 再重跑 fetch。" % (vids[0].name, j.parts))
+    k0, tmp = pk[0][0], j.parts / "_out.mkv"
+    cmd = [shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-y", "-i", str(vids[0])]
+    if auds:
+        a0 = stitch.audio_packets(auds[0])[0][0]
+        cmd += ["-itsoffset", "%.3f" % max(0.0, w0 - k0), "-ss", "%.3f" % max(0.0, w0 - a0), "-i", str(auds[0]),
+                "-map", "0:v", "-map", "1:a"]
+    else:
+        cmd += ["-map", "0"]
+    if subprocess.call(cmd + ["-c", "copy", "-t", "%.3f" % (w1 - k0), str(tmp)]) != 0:
+        die("切出这一段失败。下好的文件在 %s，不会丢。" % j.parts)
+    ok, msg = stitch.verify(tmp, expected_s=w1 - w0)
+    print("检查结果：" + msg)
+    if not ok:
+        die("结果没通过检查，已保留在 %s，不会覆盖。可以加 --sections 改用分段下载。" % tmp)
+    shutil.move(str(tmp), str(j.out))
+    if not j.a.keep:
+        shutil.rmtree(j.parts, ignore_errors=True)
+    print("完成：%s" % j.out)
+
+
 def _plan(j: _Job, w0: float, w1: float, seed: Path):
     """已有的成品或半截文件，以及分片计划。返回 (plan, use_seed)；成品已完整时返回 (None, False)。"""
     expected = w1 - w0
@@ -224,6 +290,13 @@ def cmd_fetch(a) -> None:
     if not j.sec.get("download"):
         return _fetch_whole(j)
     w0, w1 = [_t2s(x) for x in j.sec["download"].split("-")]
+    if not a.sections and not (j.parts / "seed.mkv").exists():
+        if j.out.exists() and not a.force and stitch.duration_ok(video_duration(j.out) or 0.0, w1 - w0):
+            return print("%s 已经存在且完整：%s" % (j.out.name, stitch.verify(j.out, expected_s=w1 - w0)[1]))
+        try:
+            return _fetch_ranges(j, w0, w1)
+        except ranges.NoIndex as e:
+            print("不能按索引下载（%s），改用分段下载" % e)
     print("下载范围 %s → %s（约 %.1f 分钟），格式 %s，每片 %d 秒" % (_s2t(w0), _s2t(w1), (w1 - w0) / 60, j.fmt, a.chunk))
     j.parts.mkdir(exist_ok=True)
     seed = j.parts / "seed.mkv"
@@ -248,6 +321,7 @@ def args(p) -> None:
     p.add_argument("--chunk", type=int, default=600, help="每片秒数"); p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--retries", type=int, default=3); p.add_argument("--force", action="store_true")
     p.add_argument("--no-seed", action="store_true"); p.add_argument("--keep", action="store_true")
+    p.add_argument("--sections", action="store_true", help="不按索引下载，直接用分段下载")
 
 
 STAGE = Stage("fetch", "下载视频（可续传）", done, cmd_fetch, args)
