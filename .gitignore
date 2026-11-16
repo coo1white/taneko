@@ -36,3 +36,8 @@ _parts/
 .DS_Store
 .pytest_cache/
 __pycache__/
+
+# packaging
+build/
+dist/
+*.egg-info/

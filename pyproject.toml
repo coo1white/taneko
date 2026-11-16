@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taneko"
+version = "0.1.0"  # 和 taneko/__init__.py 的 __version__ 一致（测试会查）
+description = "Download part of a long video. If it stops, run it again and it picks up where it stopped."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+keywords = ["video", "download", "resume", "yt-dlp", "ffmpeg"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.urls]
+Homepage = "https://github.com/coo1white/taneko"
+Issues = "https://github.com/coo1white/taneko/issues"
+
+[project.scripts]
+taneko = "taneko.cli:main"
+
+[tool.setuptools]
+packages = ["taneko", "taneko.stages", "taneko.workers"]
+
+[tool.setuptools.package-data]
+taneko = ["config/*.json"]

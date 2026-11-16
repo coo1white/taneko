@@ -34,7 +34,7 @@ workers/     在 taneko 之外的环境里运行的脚本（如 Whisper 的 venv
 - 阶段之间互不引用。
 - 阶段出错只抛出 `core.Fail`，不自己退出程序；由 `cli` 打印“错误：……”，并以退出码 1 退出。
 
-外部工具都以子进程调用，不链接：fetch 用 yt-dlp、ffmpeg 和浏览器 cookies；asr 用 Whisper（`config/asr.json` 的 `home`）；translate 用 llm-subtrans（`TANEKO_VENDOR`）和 API 密钥（环境变量）。
+外部工具都以子进程调用，不链接：fetch 用 yt-dlp、ffmpeg 和浏览器 cookies；asr 用 Whisper（`taneko/config/asr.json` 的 `home`）；translate 用 llm-subtrans（`TANEKO_VENDOR`）和 API 密钥（环境变量）。
 
 ## 3. 一次 `run`
 

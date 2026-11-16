@@ -371,6 +371,24 @@ class Init(unittest.TestCase):
         self.assertFalse((core.PROJECTS / "init-group" / "g5").exists())
 
 
+class Packaging(unittest.TestCase):
+    """pip 安装（issue #5）：pyproject.toml 要带上每个子包和每个配置文件，否则装好的 taneko 缺文件。"""
+
+    def test_pyproject_lists_every_package_and_config(self):
+        import tomllib
+        root = Path(core.__file__).resolve().parent.parent
+        conf = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
+        pkgs = {".".join(f.parent.relative_to(root).parts) for f in (root / "taneko").rglob("__init__.py")}
+        self.assertEqual(set(conf["tool"]["setuptools"]["packages"]), pkgs)
+        self.assertEqual(conf["tool"]["setuptools"]["package-data"]["taneko"], ["config/*.json"])
+        self.assertTrue(list((root / "taneko" / "config").glob("*.json")))
+        self.assertEqual(conf["project"]["scripts"]["taneko"], "taneko.cli:main")
+        self.assertEqual(conf["project"]["requires-python"], ">=3.11")
+        self.assertEqual(conf["project"]["dependencies"], [])   # 只用标准库
+        import taneko
+        self.assertEqual(conf["project"]["version"], taneko.__version__)
+
+
 class Ranges(unittest.TestCase):
     """按索引下载（issue #8）：读 MP4 的 sidx 和 WebM 的 Cues，只取覆盖这段时间的字节，断了接着下。"""
 

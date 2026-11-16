@@ -18,7 +18,7 @@ def cmd_approve(a) -> None:
 def cmd_init(a) -> None:
     d = project.create(a.name, a.url, a.section, a.browser)
     print("已建好项目：%s" % (d / "meta.json"))
-    print("下一步：python %s run %s" % (core.FRAMEWORK_DIR.name + "/taneko.py", d.name))
+    print("下一步：%s run %s" % (core.COMMAND, d.name))
 
 
 def build_parser() -> argparse.ArgumentParser:

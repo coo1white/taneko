@@ -162,7 +162,7 @@ YouTube 偶尔会对新地址返回 403，Taneko 会等几秒再试，再不行�
 
 还要装：
 
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：单独的 venv，建议用 CUDA 显卡。在 `config/asr.json` 的 `home` 里写它的目录。
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：单独的 venv，建议用 CUDA 显卡。在 `taneko/config/asr.json` 的 `home` 里写它的目录。
 - [llm-subtrans](https://github.com/machinewrapped/llm-subtrans)：翻译用，还要一个 OpenAI 兼容接口的密钥。
 
 `meta.json` 的写法：
@@ -223,9 +223,10 @@ python taneko/taneko.py key clear    # 删除
 <details>
 <summary><b>配置和目录</b></summary>
 
-- 项目默认在代码文件夹旁边的 `projects/`；翻译工具默认在旁边的 `workflow/vendor/`。
+- 从源码运行时，项目默认在代码文件夹旁边的 `projects/`。用 pip 安装后，默认在用户目录下的 `taneko/projects/`（Windows 是 `C:\Users\你的用户名\taneko\projects`）。`doctor` 会显示实际位置。
+- 翻译工具默认在项目目录旁边的 `workflow/vendor/`。
 - 用环境变量改位置：`TANEKO_ROOT`、`TANEKO_PROJECTS`、`TANEKO_CONFIG`、`TANEKO_VENDOR`。
-- 转写设置在 `config/asr.json`；翻译设置（接口、模型、分段大小）在 `config/translate.json`。
+- 转写设置在 `taneko/config/asr.json`；翻译设置（接口、模型、分段大小）在 `taneko/config/translate.json`。
 
 </details>
 
@@ -260,7 +261,7 @@ python taneko/taneko.py key clear    # 删除
 | 媒体处理 | FFmpeg / ffprobe（LGPL 2.1+，视构建方式可能为 GPL） | 无损截取、拼接、检查，子进程调用 |
 | 语音识别 | faster-whisper + CTranslate2，large-v3，CUDA，失败时退回 CPU | 本地转写 |
 | 翻译 | llm-subtrans + OpenAI 兼容接口（只测过 OpenCode） | 按术语表翻译；每 200 条存一次，中断后只补没译完的 |
-| 状态 | 每个项目一个 `meta.json`；`config/*.json` | 项目设置、术语表、检查点记录 |
+| 状态 | 每个项目一个 `meta.json`；`taneko/config/*.json` | 项目设置、术语表、检查点记录 |
 | 质量 | `unittest`、Mermaid、Git | 测试、架构图、版本管理 |
 
 Taneko 只调用这些工具，不打包它们的代码。请自行安装，并遵守各自的许可证。

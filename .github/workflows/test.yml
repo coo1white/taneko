@@ -38,3 +38,12 @@ jobs:
         run: choco install ffmpeg -y --no-progress
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Install as a package and run it
+        shell: bash
+        run: |
+          python -m pip install -q .
+          cd "$RUNNER_TEMP"
+          taneko --help > /dev/null
+          python -c "import taneko.core as c; assert not c.FROM_SOURCE and (c.CONFIG / 'asr.json').is_file(), c.CONFIG"
+          TANEKO_PROJECTS="$RUNNER_TEMP/p" taneko init demo https://example.com/v --section 1:00-2:00
+          test -f "$RUNNER_TEMP/p/demo/meta.json"

@@ -44,15 +44,15 @@ def checks(platform: str = sys.platform) -> list:
         out.append((True, exe, bool(v), v or "没找到。装法：%s" % _how(tool, platform)))
     v = _version(core.tool_cmd("yt-dlp", "yt_dlp") + ["--version"])
     out.append((True, "yt-dlp", bool(v), v or "没找到。装法：%s" % _how("yt-dlp", platform)))
-    out.append((True, "项目目录", core.PROJECTS.is_dir(), "%s%s" % (core.PROJECTS, "" if core.PROJECTS.is_dir() else
-                "，还不存在：新建它，或用环境变量 TANEKO_PROJECTS 指定")))
+    out.append((False, "项目目录", core.PROJECTS.is_dir(), "%s%s" % (core.PROJECTS, "" if core.PROJECTS.is_dir() else
+                "，还没有：第一次 taneko init 时会自动建。想放别处，设环境变量 TANEKO_PROJECTS")))
     try:
         home = Path(core.load_config("asr").get("home", ""))
     except core.Fail:
         home = Path("")
     whisper = any((home / "venv" / s / n).exists() for s, n in (("Scripts", "python.exe"), ("bin", "python")))
     out.append((False, "Whisper 转写（字幕，实验性）", whisper, str(home) if whisper else
-                "没找到 venv（config/asr.json 的 home）。只下载视频不需要它"))
+                "没找到 venv（taneko/config/asr.json 的 home）。只下载视频不需要它"))
     tool = core.VENDOR / "llm-subtrans"
     out.append((False, "llm-subtrans 翻译（字幕，实验性）", tool.is_dir(), str(tool) if tool.is_dir() else
                 "没找到。只下载视频不需要它"))
@@ -64,5 +64,5 @@ def cmd_doctor(a=None) -> int:
     for must, name, ok, msg in rows:
         print("%s %s：%s" % ("✓" if ok else ("✗" if must else "–"), name, msg))
     bad = [name for must, name, ok, _ in rows if must and not ok]
-    print("\n%s" % ("下载需要的工具都齐了。" if not bad else "还缺：%s。装好后再运行 taneko doctor。" % "、".join(bad)))
+    print("\n%s" % ("下载需要的工具都齐了。" if not bad else "还缺：%s。装好后再运行 %s doctor。" % ("、".join(bad), core.COMMAND)))
     return core.EXIT_FAIL if bad else core.EXIT_OK

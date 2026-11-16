@@ -18,9 +18,13 @@ except Exception:  # noqa: BLE001
     pass
 
 FRAMEWORK_DIR = Path(__file__).resolve().parent.parent
-ROOT = Path(os.environ.get("TANEKO_ROOT") or FRAMEWORK_DIR.parent)
+# 从源码运行（旁边有 taneko.py）时，项目放在代码文件夹旁边；pip 安装后放在用户目录的 taneko/ 里
+FROM_SOURCE = (FRAMEWORK_DIR / "taneko.py").is_file()
+ROOT = Path(os.environ.get("TANEKO_ROOT") or (FRAMEWORK_DIR.parent if FROM_SOURCE else Path.home() / "taneko"))
 PROJECTS = Path(os.environ.get("TANEKO_PROJECTS") or (ROOT / "projects"))
-CONFIG = Path(os.environ.get("TANEKO_CONFIG") or (FRAMEWORK_DIR / "config"))
+CONFIG = Path(os.environ.get("TANEKO_CONFIG") or (Path(__file__).resolve().parent / "config"))
+# 提示用户下一条命令时用的写法
+COMMAND = "python %s/taneko.py" % FRAMEWORK_DIR.name if FROM_SOURCE else "taneko"
 # 翻译工具 llm-subtrans 的安装位置（沿用旧工作流里装好的那份）
 VENDOR = Path(os.environ.get("TANEKO_VENDOR") or (ROOT / "workflow" / "vendor"))
 
@@ -63,7 +67,7 @@ class Stage:
 
 
 def load_config(name: str) -> dict:
-    """读 config/<name>.json（asr.json、translate.json）。"""
+    """读 taneko/config/<name>.json（asr.json、translate.json）。"""
     f = CONFIG / (name + ".json")
     if not f.exists():
         die("找不到配置 %s" % f)
