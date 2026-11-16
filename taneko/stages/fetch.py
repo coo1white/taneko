@@ -151,16 +151,17 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
     """取一次地址，读索引，下还没下完的格式（已下完的跳过），再切出这一段。
     HLS 格式按播放列表下（见 hls.py），其余按文件里的索引下（见 ranges.py）。"""
     todo, files, shift = [], [], 0.0
-    fs = _formats(j)
+    fs = sorted(_formats(j), key=lambda f: f.get("vcodec") in (None, "none"))   # 视频在前
+    a = w0      # 视频从 w0 之前的关键帧开始；音频也从那里下，开头才不会没声音
     for f in [f for f in fs if f["protocol"] != "https"]:
         dst = j.parts / ("h_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
         files.append((dst, f.get("vcodec") not in (None, "none")))
         j.parts.mkdir(exist_ok=True)
         print("按播放列表下载格式 %s" % f["format_id"], flush=True)
-        t0 = hls.download(hls.opener(f.get("http_headers")), f["url"], dst, w0, w1, log=lambda m: print(m, flush=True))
+        t0 = hls.download(hls.opener(f.get("http_headers")), f["url"], dst, a, w1, log=lambda m: print(m, flush=True))
         if files[-1][1] or len(fs) == 1:   # 分片里的时间戳可能不从 0 算：用视频第一片对齐播放列表的时间
             pk = stitch.video_packets(dst) or stitch.audio_packets(dst)
-            shift = pk[0][0] - t0 if pk else 0.0
+            shift, a = (pk[0][0] - t0 if pk else 0.0), min(a, t0)
     for f in [f for f in fs if f["protocol"] == "https"]:
         dst = j.parts / ("r_%s_%d-%d.%s" % (f["format_id"], w0, w1, f["ext"]))
         files.append((dst, f.get("vcodec") not in (None, "none")))
@@ -170,7 +171,9 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
             size = f.get("filesize") or get.total   # B 站等网站不给确切大小，用服务器报的
             if not size:
                 raise ranges.NoIndex("不知道格式 %s 的文件大小" % f.get("format_id"))
-            todo.append((f, get, dst, init, size) + ranges.pick(frags, size, w0, w1)[1:])
+            t0, lo, hi = ranges.pick(frags, size, a, w1)
+            a = min(a, t0) if files[-1][1] else a
+            todo.append((f, get, dst, init, size, lo, hi))
     j.parts.mkdir(exist_ok=True)
     for f, get, dst, init, size, lo, hi in todo:
         print("按索引下载格式 %s：%.1f MiB（整个文件 %.1f MiB）" % (f["format_id"], (init + hi - lo + 1) / 2**20, size / 2**20))
@@ -184,7 +187,7 @@ def _ranges_once(j: _Job, w0: float, w1: float) -> None:
 
 
 def _cut(j: _Job, files: list, w0: float, w1: float, shift: float = 0.0) -> None:
-    """视频从 w0 之前最近的关键帧开始，音频从 w0 开始，都到 w1；不重新编码。检查通过才替换成品。
+    """视频从 w0 之前最近的关键帧开始，音频尽量也从那里开始（开头不会没声音），都到 w1；不重新编码。检查通过才替换成品。
     shift：文件里的时间戳比视频时间多出的秒数（HLS 分片常从 1.4 秒之类开始），两条流相同。"""
     vids = [p for p, v in files if v] or [files[0][0]]
     auds = [p for p, v in files if not v and p not in vids]
@@ -197,11 +200,12 @@ def _cut(j: _Job, files: list, w0: float, w1: float, shift: float = 0.0) -> None
     cmd = ff + ["-i", str(vids[0])]
     if auds:
         a0, acut = stitch.audio_packets(auds[0])[0][0] - shift, j.parts / "_a.mka"
+        a1 = max(k0, a0)    # 音频从关键帧开始；音频没下到那么早时，从有的地方开始
         # 在输出端截：WebM 的索引指向原文件的字节位置，在输入端跳转会读不到任何音频
-        if subprocess.call(ff + ["-i", str(auds[0]), "-ss", "%.3f" % max(0.0, w0 - a0), "-map", "0:a:0",
+        if subprocess.call(ff + ["-i", str(auds[0]), "-ss", "%.3f" % (a1 - a0), "-map", "0:a:0",
                                  "-c", "copy", str(acut)]) != 0:
             die("截取音频失败。下好的文件在 %s，不会丢。" % j.parts)
-        cmd += ["-itsoffset", "%.3f" % max(0.0, w0 - k0), "-i", str(acut), "-map", "0:v", "-map", "1:a"]
+        cmd += ["-itsoffset", "%.3f" % (a1 - k0), "-i", str(acut), "-map", "0:v", "-map", "1:a"]
     else:
         cmd += ["-map", "0"]
     if subprocess.call(cmd + ["-c", "copy", "-t", "%.3f" % (w1 - k0), str(tmp)]) != 0:

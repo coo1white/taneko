@@ -52,6 +52,22 @@ class ExitCodes(unittest.TestCase):
                 cli.main(["run"])
         self.assertEqual(cm.exception.code, 2)
 
+    def test_no_args_shows_short_help(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(cli.main([]), core.EXIT_OK)
+        text = out.getvalue()
+        self.assertIn("例子", text)
+        self.assertNotIn("translate ", text.split("例子")[0])   # 字幕命令不在常用命令里
+
+    def test_empty_status_says_what_to_do(self):
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch.object(project, "PROJECTS", TMP / "no-projects-yet"), redirect_stdout(out):
+            (TMP / "no-projects-yet").mkdir(exist_ok=True)
+            cli.main(["status"])
+        self.assertIn("init", out.getvalue())
+
     def test_unknown_project_exits_fail(self):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["run", "no-such-project"]), core.EXIT_FAIL)
@@ -541,10 +557,10 @@ class Ranges(unittest.TestCase):
             fetch._ranges_once = old
 
     def test_cut_gives_a_clean_section(self):
-        v, _ = self.fetch_range(self.v, "webm", 12, 31, "cv.webm")
+        v, tv = self.fetch_range(self.v, "webm", 12, 31, "cv.webm")
         for src, ext in ((self.a, "m4a"), (self.opus, "webm")):   # WebM 音频不能在输入端跳转（Windows 试用时发现）
             with self.subTest(ext):
-                a, _ = self.fetch_range(src, ext, 12, 31, "ca." + ext)
+                a, _ = self.fetch_range(src, ext, tv, 31, "ca." + ext)   # 音频从视频的关键帧开始下，和 fetch 一样
                 parts = self.dir / ("cut_" + ext)
                 parts.mkdir()
                 j = SimpleNamespace(parts=parts, out=self.dir / ("cut_%s.mkv" % ext), a=SimpleNamespace(keep=True))
@@ -553,7 +569,7 @@ class Ranges(unittest.TestCase):
                 ok, msg = stitch.verify(j.out, expected_s=19, need_audio=True)
                 self.assertTrue(ok, msg)
                 ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
-                self.assertAlmostEqual(ap[0][0] - vp[0][0], 12 - 10, delta=0.05)   # 视频从 10 秒的关键帧开始，音频从 12 秒开始
+                self.assertAlmostEqual(ap[0][0], vp[0][0], delta=0.05)   # 视频从 10 秒的关键帧开始，音频也是：开头不会没声音
 
     def test_missing_audio_fails_the_check(self):
         out = self.dir / "silent.mkv"
@@ -640,7 +656,8 @@ class Hls(unittest.TestCase):
         ok, msg = stitch.verify(j.out, expected_s=8, need_audio=True)
         self.assertTrue(ok, msg)
         ap, vp = stitch.audio_packets(j.out), stitch.video_packets(j.out)
-        self.assertAlmostEqual(ap[0][0] - vp[0][0], 13 - 12, delta=0.1)   # 视频从 12 秒的分片开始，声音从 13 秒开始
+        self.assertAlmostEqual(ap[0][0] - vp[0][0], 0, delta=0.1)   # 视频从 12 秒的分片开始，声音也是
+        self.assertAlmostEqual(vp[-1][0] - vp[0][0], 21 - 12, delta=0.5)   # 结尾截在 21 秒；时间戳没对齐会差 1.4 秒
 
 
 class Seams(unittest.TestCase):

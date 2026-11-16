@@ -88,6 +88,8 @@ def status(name=None, as_json=False) -> None:
     if as_json:
         print(json.dumps({"projects": rows}, ensure_ascii=False, indent=2))
         return
+    if not rows:
+        print("还没有项目（在 %s 下）。新建一个：%s init 名字 视频地址" % (project.PROJECTS, core.COMMAND))
     for r in rows:
         print("%s  %s" % (r["project"], "已完成" if r["next"] is None else "下一步：" + STAGES[r["next"]].label))
         if name or r["next"] is not None:
