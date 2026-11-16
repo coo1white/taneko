@@ -136,8 +136,10 @@ def _formats(j: _Job) -> list:
             break
         time.sleep(5 * (n < 2))
     else:
-        why = (r.stderr.strip().splitlines() or ["退出码 %s" % r.returncode])[-1][:200]
-        raise ranges.NoIndex("yt-dlp 读不到格式信息：%s" % why)
+        why = (r.stderr.strip().splitlines() or ["退出码 %s" % r.returncode])[-1][:300]
+        # 分段下载也靠 yt-dlp 取信息，改用它也会失败：直接停下，把原因说清楚
+        die("yt-dlp 取不到这个视频的信息：%s\n网站要求登录时（例如 YouTube 说要确认不是机器人），在浏览器里登录这个网站，"
+            "再在 meta.json 的 \"fetch\" 里写 \"browser\": \"firefox\"（或你用的浏览器），然后重跑。" % why)
     info = json.loads(r.stdout.strip().splitlines()[-1])
     fs = info.get("requested_formats") or [info]
     for f in fs:
