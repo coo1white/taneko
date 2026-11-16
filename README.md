@@ -1,4 +1,4 @@
-# Taneko（たね子）工坊
+# Taneko
 
 *Stay with me, even when the connection drops.*
 
