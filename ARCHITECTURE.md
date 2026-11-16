@@ -15,6 +15,8 @@
 
 加一个阶段 = 在 `stages/` 里加一个文件，并把它放进 `flow.STAGES` 和 `flow.plan`。
 
+> 字幕相关的阶段（asr、subs、terms、fix、translate、check 和两个人工检查点）是实验性功能，暂停开发，见 ROADMAP 的“暂停”一节。架构不变，它们照常能跑。
+
 ## 2. 分层
 
 ```
