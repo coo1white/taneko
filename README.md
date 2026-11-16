@@ -2,8 +2,8 @@
 
 [![test](https://github.com/coo1white/taneko/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/coo1white/taneko/actions/workflows/test.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#快速上手5-分钟)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/coo1white/taneko#快速上手5-分钟)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coo1white/taneko/blob/main/LICENSE)
 
 *Stay with me, even when the connection drops.*
 
@@ -108,7 +108,7 @@ python taneko/taneko.py run game3
 建项目时加 `--browser chrome`。写 `--browser none` 表示不读浏览器的登录信息。
 
 **下载失败了？**
-看屏幕上“错误：”后面的说明，照着做，再跑一次。还不行就[提一个 issue](../../issues)，附上屏幕上的输出。
+看屏幕上“错误：”后面的说明，照着做，再跑一次。还不行就[提一个 issue](https://github.com/coo1white/taneko/issues)，附上屏幕上的输出。
 
 ## 进阶
 
@@ -240,18 +240,18 @@ python taneko/taneko.py key clear    # 删除
 
 | 在真实环境测过 | 还没测过 |
 |---|---|
-| 分段下载、半截文件对齐、拼接：一局 55 分钟的 1440p60 视频，复用 41 分钟的旧文件，对齐误差 0.00，视频无断档。2026-11-16 前拼的文件接缝处有 0.5～3.5 秒没声音，已修复（issue [#1](../../issues/1)） | 转写、术语校对、翻译（实验性，暂停开发） |
-| 按索引下载一段（issue [#8](../../issues/8)）：YouTube 1440p60，中途强行停掉再跑，从已下的 160 MiB 接着下；画面和整条下载逐字节相同，音画差 5～21 毫秒；约 8 MiB/s（分段下载约 2 倍实时） | B 站、X 等网站的按索引下载 |
+| 分段下载、半截文件对齐、拼接：一局 55 分钟的 1440p60 视频，复用 41 分钟的旧文件，对齐误差 0.00，视频无断档。2026-11-16 前拼的文件接缝处有 0.5～3.5 秒没声音，已修复（issue [#1](https://github.com/coo1white/taneko/issues/1)） | 转写、术语校对、翻译（实验性，暂停开发） |
+| 按索引下载一段（issue [#8](https://github.com/coo1white/taneko/issues/8)）：YouTube 1440p60，中途强行停掉再跑，从已下的 160 MiB 接着下；画面和整条下载逐字节相同，音画差 5～21 毫秒；约 8 MiB/s（分段下载约 2 倍实时） | B 站、X 等网站的按索引下载 |
 | Windows 上按索引下载：用 Firefox 登录信息，格式 308+140 跑了 3 次都成功，每次约 50 秒（分段下载 176 秒）；默认格式（AV1 + Opus）照快速上手走了一遍 | macOS、Linux 上的真实下载（只有自动测试） |
 | 多片同时下载（`--jobs 2`）：同一场比赛的另外 4 段 | |
 | 流程、人工检查点、退出码、分段翻译：有自动测试 | |
 
 已知问题：
 
-- 在新电脑上安装还不方便：issue [#5](../../issues/5)。
-- 字幕的已知问题随字幕一起暂停，见 [ROADMAP.md](ROADMAP.md) 的“暂停”一节。
+- 在新电脑上安装还不方便：issue [#5](https://github.com/coo1white/taneko/issues/5)。
+- 字幕的已知问题随字幕一起暂停，见 [ROADMAP.md](https://github.com/coo1white/taneko/blob/main/ROADMAP.md) 的“暂停”一节。
 
-全部问题见 [Issues](../../issues)，计划见 [ROADMAP.md](ROADMAP.md)，架构见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+全部问题见 [Issues](https://github.com/coo1white/taneko/issues)，计划见 [ROADMAP.md](https://github.com/coo1white/taneko/blob/main/ROADMAP.md)，架构见 [ARCHITECTURE.md](https://github.com/coo1white/taneko/blob/main/ARCHITECTURE.md)。
 
 </details>
 
@@ -291,7 +291,7 @@ Taneko 只调用这些工具，不打包它们的代码。请自行安装，并�
 
 ## 许可证
 
-[MIT 许可证](LICENSE)：可以自由使用、修改、分发，保留版权声明即可。
+[MIT 许可证](https://github.com/coo1white/taneko/blob/main/LICENSE)：可以自由使用、修改、分发，保留版权声明即可。
 
 如果它帮你省了时间，欢迎点右上角的 ⭐ **Star**。这是请求，不是使用条件。
 

@@ -28,7 +28,7 @@ Issues = "https://github.com/coo1white/taneko/issues"
 taneko = "taneko.cli:main"
 
 [tool.setuptools]
-packages = ["taneko", "taneko.stages", "taneko.workers"]
+packages = ["taneko", "taneko.config", "taneko.stages", "taneko.workers"]
 
 [tool.setuptools.package-data]
-taneko = ["config/*.json"]
+"taneko.config" = ["*.json"]

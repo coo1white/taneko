@@ -379,8 +379,8 @@ class Packaging(unittest.TestCase):
         root = Path(core.__file__).resolve().parent.parent
         conf = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))
         pkgs = {".".join(f.parent.relative_to(root).parts) for f in (root / "taneko").rglob("__init__.py")}
-        self.assertEqual(set(conf["tool"]["setuptools"]["packages"]), pkgs)
-        self.assertEqual(conf["tool"]["setuptools"]["package-data"]["taneko"], ["config/*.json"])
+        self.assertEqual(set(conf["tool"]["setuptools"]["packages"]), pkgs | {"taneko.config"})   # config 只有数据文件
+        self.assertEqual(conf["tool"]["setuptools"]["package-data"], {"taneko.config": ["*.json"]})
         self.assertTrue(list((root / "taneko" / "config").glob("*.json")))
         self.assertEqual(conf["project"]["scripts"]["taneko"], "taneko.cli:main")
         self.assertEqual(conf["project"]["requires-python"], ">=3.11")
