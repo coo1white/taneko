@@ -186,6 +186,19 @@ class Init(unittest.TestCase):
         self.assertEqual(fetch.expected_duration(meta), 60)
         self.assertNotIn("fetch", meta)   # 浏览器用默认的 firefox
 
+    def test_cookies_file_beats_browser(self):
+        self.assertEqual(self.init("ck", "https://x.test/v")[0], core.EXIT_OK)
+        d = project.project_dir("ck")
+        meta = project.load_meta(d); meta["fetch"] = {"browser": "chrome", "cookies": "c.txt"}
+        project.save_meta(d, meta)
+        a = SimpleNamespace(project="ck", format=None, browser=None, cookies=None)
+        with self.assertRaises(core.Fail):
+            fetch._Job(a)                                   # 文件还不在：停下说清楚
+        (d / "c.txt").write_text("# Netscape HTTP Cookie File\n", "utf-8")
+        self.assertEqual(fetch._Job(a).cookies, ["--cookies", str(d / "c.txt")])
+        a.cookies = str(d / "c.txt")                        # 命令行给绝对路径也行
+        self.assertEqual(fetch._Job(a).cookies[1], str(d / "c.txt"))
+
     def test_init_refuses_bad_input(self):
         self.assertEqual(self.init("init-group/g4", '"https://x.test/v"', "--browser", "none")[0], core.EXIT_OK)
         meta = project.load_meta(project.project_dir("g4"))

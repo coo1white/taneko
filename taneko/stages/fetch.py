@@ -98,6 +98,11 @@ class _Job:
         self.parts = self.d / "_parts"
         self.ytdlp = tool_cmd("yt-dlp", "yt_dlp")
         self.cookies = [] if browser == "none" else ["--cookies-from-browser", browser]
+        cfile = a.cookies or fcfg.get("cookies")   # 没有浏览器的服务器：用从浏览器导出的 cookies.txt
+        if cfile:
+            c = self.d / Path(cfile).expanduser()   # 相对路径从项目文件夹算
+            c.is_file() or die("找不到登录信息文件 %s。在自己电脑的浏览器里导出 cookies.txt（Netscape 格式），放到这里再重跑。" % c)
+            self.cookies = ["--cookies", str(c)]
 
     def piece(self, path: Path, ta: float, tb: float) -> int:
         cmd = self.ytdlp + ["-q", "--no-warnings"] + self.cookies + [
@@ -139,7 +144,8 @@ def _formats(j: _Job) -> list:
         why = (r.stderr.strip().splitlines() or ["退出码 %s" % r.returncode])[-1][:300]
         # 分段下载也靠 yt-dlp 取信息，改用它也会失败：直接停下，把原因说清楚
         die("yt-dlp 取不到这个视频的信息：%s\n网站要求登录时（例如 YouTube 说要确认不是机器人），在浏览器里登录这个网站，"
-            "再在 meta.json 的 \"fetch\" 里写 \"browser\": \"firefox\"（或你用的浏览器），然后重跑。" % why)
+            "再在 meta.json 的 \"fetch\" 里写 \"browser\": \"firefox\"（或你用的浏览器），然后重跑。"
+            "\n没有浏览器的服务器：从浏览器导出 cookies.txt，在 \"fetch\" 里写 \"cookies\": \"文件路径\"。" % why)
     info = json.loads(r.stdout.strip().splitlines()[-1])
     fs = info.get("requested_formats") or [info]
     for f in fs:
@@ -370,6 +376,7 @@ def cmd_fetch(a) -> None:
 
 def args(p) -> None:
     p.add_argument("--format", default=None); p.add_argument("--browser", default=None)
+    p.add_argument("--cookies", default=None, help="cookies.txt 文件（没有浏览器时用）")
     p.add_argument("--chunk", type=int, default=600, help="每片秒数"); p.add_argument("--jobs", type=int, default=1)
     p.add_argument("--retries", type=int, default=3); p.add_argument("--force", action="store_true")
     p.add_argument("--no-seed", action="store_true"); p.add_argument("--keep", action="store_true")

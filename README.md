@@ -129,6 +129,9 @@ taneko run game3
 **不用 Firefox？**
 建项目时加 `--browser chrome`。写 `--browser none` 表示不读浏览器的登录信息。
 
+**在没有浏览器的服务器上下？**
+YouTube 和 B 站常常拦云服务器的地址，要求登录。在自己电脑的浏览器里导出 cookies.txt（Netscape 格式，用浏览器扩展导出），传到服务器上，在 `meta.json` 的 `"fetch"` 里写 `"cookies": "文件路径"`（相对路径从项目文件夹算），或者给 `fetch` 加 `--cookies 文件路径`。这个文件等于你的登录状态，别发给别人，也别放进 git。
+
 **下载失败了？**
 看屏幕上“错误：”后面的说明，照着做，再跑一次。还不行就[提一个 issue](https://github.com/coo1white/taneko/issues)，附上屏幕上的输出。
 
@@ -151,13 +154,13 @@ taneko doctor               # 检查工具
 
 项目可以分组，最多 3 层：`init lol-worlds/game3 网址` 会建在 `projects/lol-worlds/game3/`，之后用 `run game3` 就行。
 
-`init` 写出的 `meta.json` 也可以手动改：
+`init` 写出的 `meta.json` 也可以手动改（`cookies` 可选，有它就不读浏览器）：
 
 ```json
 {
   "source_url": "https://www.youtube.com/watch?v=...",
   "section": { "name": "game3", "download": "4:13:00-5:08:00" },
-  "fetch": { "browser": "chrome" }
+  "fetch": { "browser": "chrome", "cookies": "cookies.txt" }
 }
 ```
 
@@ -216,16 +219,18 @@ YouTube 偶尔会对新地址返回 403，Taneko 会等几秒再试，再不行�
 
 四个环境实测（2026-11-17，同一份代码，全新安装）：
 
-| 功能 | Windows（PowerShell） | Windows（WSL） | Linux（GitHub 的 Ubuntu） | macOS（arm64） |
+| 功能 | Windows（PowerShell） | Windows（WSL） | Linux（云服务器，GitHub 的 Ubuntu） | macOS（arm64） |
 |---|---|---|---|---|
 | 安装、`doctor`、`--version` | ✓ | ✓ | ✓ | ✓ |
-| YouTube 下一段 | ✓ | ✓ | 网站要求登录（机房地址，没有浏览器） | ✓ |
+| YouTube 下一段 | ✓ | ✓ | 网站要求登录（机房地址）→ 用 cookies 文件 | ✓ |
 | X 下一段 | ✓ | ✓ | ✓ | ✓ |
-| B 站下一段 | ✓ | ✓ | 网站拒绝（412，机房地址） | ✓ |
+| B 站下一段 | ✓ | ✓ | 网站拒绝（412，机房地址）→ 用 cookies 文件 | ✓ |
 | 进度行在终端里原地刷新 | ✓ | ✓ | ✓ | ✓ |
 | 下到一半按 Ctrl+C，重跑接着下 | ✓ | ✓ | ✓（X） | ✓ |
 
 Windows 用的是 Firefox 登录信息，其他环境都没登录。
+
+WSL 就是 Linux（Ubuntu），走家里的网络，所以家用 Linux 电脑看 WSL 这一列。云服务器那一列的两处失败是网站拦机房地址，不是 Linux 的问题；带上 cookies 文件（见上面的“在没有浏览器的服务器上下？”）通常能过，但我们没有在云服务器上用真账号测过，YouTube 偶尔还会拦。
 
 | 在真实环境测过 | 还没测过 |
 |---|---|
@@ -262,6 +267,7 @@ Taneko 只调用这些工具，不打包它们的代码。请自行安装，并�
 
 - 只下你有权下载的内容。遵守平台条款和当地法律；转载前确认版权。
 - 默认读取本机 Firefox 的登录信息（cookies），只在本地用，不写文件、不上传。
+- 用 cookies 文件时，yt-dlp 会把网站更新的 cookies 写回这个文件；文件只在本地用，不上传。
 
 ## 致敬 BitTorrent
 
