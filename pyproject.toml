@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taneko"
-version = "0.1.0"  # 和 taneko/__init__.py 的 __version__ 一致（测试会查）
+version = "0.1.1"  # 和 taneko/__init__.py 的 __version__ 一致（测试会查）
 description = "Download part of a long video. If it stops, run it again and it picks up where it stopped."
 readme = "README.md"
 license = "MIT"
