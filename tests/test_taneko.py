@@ -354,11 +354,15 @@ class Seams(unittest.TestCase):
         self.assertAlmostEqual(ap[-1][0] + ap[-1][1] - ap[0][0], 40, delta=0.2, msg=msg)
 
     def test_verify_reports_a_silent_gap(self):
-        out = self.dir / "gap.mkv"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(self.v), "-i", str(self.a), "-map", "0:v", "-map", "1:a",
-                        "-af", "aselect='not(between(t,12,14))',asetpts=PTS", "-c:v", "copy", "-c:a", "aac", str(out)], check=True)
+        ff = ["ffmpeg", "-v", "error", "-y", "-copyts"]
+        a1, a2, lst, out = (self.dir / n for n in ("g1.mka", "g2.mka", "gap.txt", "gap.mkv"))
+        subprocess.run(ff + ["-t", "10", "-i", str(self.a), "-c", "copy", str(a1)], check=True)
+        subprocess.run(ff + ["-ss", "14", "-t", "16", "-i", str(self.a), "-c", "copy", str(a2)], check=True)
+        lst.write_text("file '%s'\ninpoint 0\nduration 14\nfile '%s'\ninpoint 14\n" % (a1.as_posix(), a2.as_posix()), "utf-8")
+        subprocess.run(ff + ["-t", "30", "-i", str(self.v), "-f", "concat", "-safe", "0", "-i", str(lst),
+                             "-map", "0:v", "-map", "1:a", "-c", "copy", str(out)], check=True)  # 10～14 秒没有音频
         ok, msg = stitch.verify(out)
-        self.assertFalse(ok)
+        self.assertFalse(ok, msg)
         self.assertIn("没声音", msg)
 
     def test_one_rule_for_complete(self):
