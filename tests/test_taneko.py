@@ -575,11 +575,11 @@ class Hls(unittest.TestCase):
         aud = ["sine=frequency=440:duration=30", "-c:a", "aac"]
         for kind, seg in (("fmp4", "m4s"), ("mpegts", "ts")):     # X 用 fMP4；TS 的时间戳通常从 1.4 秒开始
             for name, args in (("v", vid), ("a", aud)):
-                out = cls.dir / ("%s_%s" % (kind, name))
-                extra = ["-hls_fmp4_init_filename", out.name + "_init.mp4"] if kind == "fmp4" else []
+                out = "%s_%s" % (kind, name)        # 相对文件名，在测试目录里运行：Windows 上 init 文件才不会写到别处
+                extra = ["-hls_fmp4_init_filename", out + "_init.mp4"] if kind == "fmp4" else []
                 subprocess.run(lav + args + ["-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod",
                                              "-hls_segment_type", kind, "-hls_segment_filename",
-                                             str(out) + "_%03d." + seg] + extra + [str(out) + ".m3u8"], check=True)
+                                             out + "_%03d." + seg] + extra + [out + ".m3u8"], check=True, cwd=cls.dir)
 
     @staticmethod
     def fetcher(fail_after=None):
