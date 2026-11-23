@@ -32,7 +32,7 @@ def snapshot(d: Path, meta: dict) -> list:
     return out
 
 
-def defaults(st: core.Stage, name: str, jobs: int) -> argparse.Namespace:
+def defaults(st: core.Stage, name: str, jobs: int, connections=None) -> argparse.Namespace:
     """run 调用某阶段时的参数：就是单独运行这个阶段时的默认值（只有一处定义）。"""
     p = argparse.ArgumentParser()
     p.add_argument("project")
@@ -41,10 +41,12 @@ def defaults(st: core.Stage, name: str, jobs: int) -> argparse.Namespace:
     a = p.parse_args([name])
     if hasattr(a, "jobs"):
         a.jobs = jobs
+    if hasattr(a, "connections"):
+        a.connections = connections
     return a
 
 
-def run(name: str, jobs: int = 1) -> int:
+def run(name: str, jobs: int = 1, connections=None) -> int:
     d = project.project_dir(name)
     for step in plan(project.load_meta(d)):
         st, meta = STAGES[step], project.load_meta(d)
@@ -52,7 +54,7 @@ def run(name: str, jobs: int = 1) -> int:
             print("✓ 跳过（已完成）：" + st.label)
             continue
         print("\n== %s ==" % st.label)
-        st.run(defaults(st, str(d), jobs))  # 只找一次项目，各阶段直接用路径
+        st.run(defaults(st, str(d), jobs, connections))  # 只找一次项目，各阶段直接用路径
         if not st.done(d, project.load_meta(d)):
             core.die("阶段“%s”跑完了但结果没通过检查，请看上面的输出" % st.label)
     print("\n全部完成。")

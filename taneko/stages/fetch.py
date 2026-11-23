@@ -81,6 +81,18 @@ def _verify_piece(path: Path, a: float, b: float, last: bool):
     return True, "%.1f 秒 → %.1f 秒%s" % (first, end, "" if ap else "（没有音频）")
 
 
+CONNECTIONS_HELP = "一个文件同时开几条连接（默认 1，或 meta.json 的 fetch.connections）；建议 4，开太多容易被限速或 403"
+
+
+def connection_args(cli, meta) -> list:
+    """一个文件同时开几条连接（yt-dlp -N）：命令行优先于 meta.json 的 fetch.connections，默认 1。
+    大于 1 时还要 --http-chunk-size，YouTube 的单个文件才会被切成多块并发下。"""
+    n = meta if cli is None else cli
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        die("connections 要是不小于 1 的整数，现在是 %r" % (n,))
+    return ["-N", str(n), "--http-chunk-size", "10M"] if n > 1 else []
+
+
 class _Job:
     """一次 fetch 要用的东西：项目、格式、cookies、yt-dlp 命令。"""
 
@@ -101,9 +113,10 @@ class _Job:
         cfile = a.cookies or fcfg.get("cookies")   # 没有浏览器的服务器：用从浏览器导出的 cookies.txt
         if cfile:
             self.cookies = ["--cookies", str(self.d / cfile)]   # 相对路径从项目文件夹算
+        self.conn = connection_args(getattr(a, "connections", None), fcfg.get("connections", 1))
 
     def piece(self, path: Path, ta: float, tb: float) -> int:
-        cmd = self.ytdlp + ["-q", "--no-warnings"] + self.cookies + [
+        cmd = self.ytdlp + ["-q", "--no-warnings"] + self.cookies + self.conn + [
             "-f", self.fmt, "--download-sections", "*%s-%s" % (_s2t(ta), _s2t(tb)),
             "--downloader-args", "ffmpeg_i:-copyts", "--merge-output-format", "mkv",
             "-P", str(self.parts), "-o", path.stem + ".%(ext)s", self.url]
@@ -114,7 +127,7 @@ def _fetch_whole(j: _Job) -> None:
     """整条视频：yt-dlp 直接下，断了重跑会从 .part 接着下；下完检查视频和音频。"""
     print("下载整条视频，格式 %s（断了重跑同一条命令，会接着下）" % j.fmt, flush=True)
     print("正在取视频地址（有时要等十几秒）……", flush=True)
-    p = subprocess.Popen(j.ytdlp + ["-q", "--no-warnings", "--progress", "--newline"] + j.cookies + [
+    p = subprocess.Popen(j.ytdlp + ["-q", "--no-warnings", "--progress", "--newline"] + j.cookies + j.conn + [
         "-f", j.fmt, "--merge-output-format", "mkv", "--remux-video", "mkv", "--no-simulate",
         "-O", "before_dl:SIZES %(requested_formats.:.filesize)j %(filesize,filesize_approx)j",
         "--progress-template", "download:GOT %(progress.downloaded_bytes)s %(info.format_id)s",
@@ -376,6 +389,7 @@ def args(p) -> None:
     p.add_argument("--format", default=None); p.add_argument("--browser", default=None)
     p.add_argument("--cookies", default=None, help="cookies.txt 文件（没有浏览器时用）")
     p.add_argument("--chunk", type=int, default=600, help="每片秒数"); p.add_argument("--jobs", type=int, default=1)
+    p.add_argument("--connections", type=int, default=None, help=CONNECTIONS_HELP)
     p.add_argument("--retries", type=int, default=3); p.add_argument("--force", action="store_true")
     p.add_argument("--no-seed", action="store_true"); p.add_argument("--keep", action="store_true")
     p.add_argument("--sections", action="store_true", help="不按索引下载，直接用分段下载")

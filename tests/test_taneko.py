@@ -211,6 +211,59 @@ class Init(unittest.TestCase):
         self.assertFalse((core.PROJECTS / "init-group" / "g5").exists())
 
 
+class Connections(unittest.TestCase):
+    """--connections / fetch.connections：一个文件同时开几条连接（yt-dlp -N），默认 1。"""
+
+    def tearDown(self):
+        shutil.rmtree(core.PROJECTS / "conn", ignore_errors=True)
+
+    def job(self, meta_conn=None, cli=None):
+        d = core.PROJECTS / "conn"
+        shutil.rmtree(d, ignore_errors=True)
+        make_project("conn", {"source_url": "https://x.test/v", "fetch": {"browser": "none"} if meta_conn is None
+                              else {"browser": "none", "connections": meta_conn}})
+        return fetch._Job(SimpleNamespace(project="conn", format=None, browser=None, cookies=None, connections=cli))
+
+    def test_default_is_one_connection(self):
+        self.assertEqual(fetch.connection_args(None, 1), [])
+        self.assertEqual(self.job().conn, [])
+        self.assertEqual(fetch._Job(SimpleNamespace(project="conn", format=None, browser=None, cookies=None)).conn, [])
+
+    def test_more_than_one_adds_chunked_download(self):
+        self.assertEqual(self.job(meta_conn=4).conn, ["-N", "4", "--http-chunk-size", "10M"])
+        self.assertEqual(self.job(cli=8).conn, ["-N", "8", "--http-chunk-size", "10M"])
+
+    def test_command_line_beats_meta(self):
+        self.assertEqual(self.job(meta_conn=4, cli=1).conn, [])
+        self.assertEqual(self.job(meta_conn=1, cli=2).conn[:2], ["-N", "2"])
+
+    def test_bad_values_are_refused(self):
+        for meta, cli in ((0, None), (-1, None), ("4", None), (True, None), (4.0, None), (4, 0), (1, -3)):
+            with self.assertRaises(core.Fail, msg=(meta, cli)):
+                fetch.connection_args(cli, meta)
+
+    def test_args_reach_both_yt_dlp_commands(self):
+        j, seen = self.job(meta_conn=4), []
+        real = fetch.subprocess.call
+        fetch.subprocess.call = lambda cmd, *a, **k: seen.append(cmd) or 0
+        try:
+            j.piece(j.parts / "p0.mkv", 0, 10)
+        finally:
+            fetch.subprocess.call = real
+        self.assertIn("-N", seen[0]); self.assertEqual(seen[0][seen[0].index("-N") + 1], "4")
+        src = Path(fetch.__file__).read_text("utf-8")
+        whole = src[src.index("def _fetch_whole"):src.index("def _formats")]
+        self.assertIn("j.conn", whole)
+
+    def test_cli_option_reaches_the_stage(self):
+        a = cli.build_parser().parse_args(["fetch", "conn", "--connections", "4"])
+        self.assertEqual(a.connections, 4)
+        a = cli.build_parser().parse_args(["run", "conn", "--connections", "3"])
+        self.assertEqual(a.connections, 3)
+        self.assertEqual(flow.defaults(flow.STAGES["fetch"], "conn", 1, 3).connections, 3)
+        self.assertIsNone(flow.defaults(flow.STAGES["fetch"], "conn", 1).connections)
+
+
 class Packaging(unittest.TestCase):
     """pip 安装（issue #5）：pyproject.toml 要带上每个子包和每个配置文件，否则装好的 taneko 缺文件。"""
 

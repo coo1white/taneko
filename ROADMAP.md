@@ -48,6 +48,7 @@ taneko 只做下载：只下长视频里需要的一段，断了能接着下。�
 | 2026-11-16 | 删掉字幕：转写、术语、修正、翻译、检查、两个人工检查点、`key`、`approve`（约 840 行） | 作者定：不重复造轮子，字幕交给 VideoLingo、pyvideotrans 这类专门的工具。删除前的代码，以及只关于字幕的旧决定（翻译服务、转写后端、人工检查点、字幕暂停），都在 git 历史里（提交 3cd4332）。删完程序代码 1,289 行 |
 | 2026-11-16 | pip 安装：`pyproject.toml` 用 setuptools，命令 `taneko`；配置文件移到 `taneko/config/`；装好后项目默认放在用户目录的 `taneko/projects/` | 装好后没有“代码旁边”这个位置，用户目录在三个系统上都有、都能写。从源码运行时照旧放在代码旁边。环境变量 `TANEKO_PROJECTS` 仍然优先。PyPI 上 `taneko` 这个名字 2026-11-16 查过没人用（`pypi.org/pypi/taneko/json` 返回 404） |
 | 2026-11-16 | yt-dlp 成为唯一的依赖（`yt-dlp[default]>=2026.10.26`），改掉 2026-11-15 定的“第三方依赖 0 个” | 作者同意。`pipx install taneko` 时一起装好，新手少装一样。taneko 只把它当命令调用（`python -m yt_dlp`），代码里仍不 import 任何第三方包（`tests/test_size.py` 查）。和 taneko 装在一起的 yt-dlp 优先于 PATH 里的。`[default]` 是 yt-dlp 推荐的 pip 装法，带上解 YouTube 验证用的 `yt-dlp-ejs`；deno 仍要另装 |
+| 2026-11-23 | 加可选的 `--connections N` / `fetch.connections`（yt-dlp `-N N --http-chunk-size 10M`），默认仍是 1 条连接；不加 aria2c | 作者定。Windows 上经本地代理实测（YouTube 1080p60 AV1，每项 40 秒）：1 条连接约 9.2 MiB/s，`-N 4/8/16/32` 跑起来时 7.5～9.5，4 个进程同下 11.2，天花板是代理线路，不是连接数；连续猛下时多次掉到约 0.5 MiB/s，还出现过一次 403。所以默认不变，文档建议 4。按索引下载一段（`ranges.py`）仍是单连接顺序请求，以后需要再做 |
 
 ## 4. 已知限制
 
