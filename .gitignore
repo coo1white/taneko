@@ -3,41 +3,37 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
 
-# 临时/中间文件
-_old_*.md
-*.bak
-*.orig
+# 打包
+build/
+dist/
+*.egg-info/
 
 # 密钥与登录信息（永远不要提交）
 cookies.json
 *cookies*.txt
 .env
+.env.*
 *.key
+*.pem
 
-# 项目数据与大文件（视频、字幕等放在 projects\ 里，不在本仓库）
+# 项目数据与媒体文件（放在 projects/ 里，不进仓库）
 projects/
+_parts/
+*.part
 *.mkv
 *.mp4
 *.m4a
-
-# more media / local artifacts
-*.srt
-*.part
 *.webm
 *.mov
 *.wav
-*.pem
-.env.*
-_parts/
+*.srt
+
+# 临时文件与编辑器
+*.bak
+*.orig
 *.log
 .idea/
 .vscode/
 .DS_Store
-.pytest_cache/
-__pycache__/
-
-# packaging
-build/
-dist/
-*.egg-info/
