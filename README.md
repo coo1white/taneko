@@ -152,15 +152,17 @@ taneko doctor               # 检查工具
 
 `fetch` 的常用选项：`--force` 重新下载，`--sections` 改用分段下载，`--keep` 保留中间文件。
 
+`--connections N`（`run` 和 `fetch` 都有）：一个文件同时开 N 条连接（交给 yt-dlp 的 `-N N --http-chunk-size 10M`），默认 1。也可以写在 `meta.json` 的 `"fetch"` 里（`"connections": 4`），命令行优先。只在整条下载和分段下载时有用；按索引、按播放列表下载一段时不受影响。线路比单条连接快时才有帮助；建议 4，开到 16、32 没有更快，反而更容易被限速或 403。
+
 项目可以分组，最多 3 层：`init lol-worlds/game3 网址` 会建在 `projects/lol-worlds/game3/`，之后用 `run game3` 就行。
 
-`init` 写出的 `meta.json` 也可以手动改（`cookies` 可选，有它就不读浏览器）：
+`init` 写出的 `meta.json` 也可以手动改（`cookies` 可选，有它就不读浏览器；`connections` 可选，默认 1）：
 
 ```json
 {
   "source_url": "https://www.youtube.com/watch?v=...",
   "section": { "name": "game3", "download": "4:13:00-5:08:00" },
-  "fetch": { "browser": "chrome", "cookies": "cookies.txt" }
+  "fetch": { "browser": "chrome", "cookies": "cookies.txt", "connections": 4 }
 }
 ```
 
